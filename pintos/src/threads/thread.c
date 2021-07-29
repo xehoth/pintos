@@ -463,6 +463,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  /* Initialize ticks_to_unblock to not unblock */
+  t->ticks_to_unblock = THREAD_TICKS_TO_UNBLOCK_NO_TICKS;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -582,3 +584,17 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+/* Check and unblock the thread whose ticks_to_unblock == ticks */
+void
+thread_unblock_check (struct thread *th, void *ticks)
+{
+  /* Only a blocked thread with correct ticks needs to unblock */
+  if (th->status == THREAD_BLOCKED && th->ticks_to_unblock == *(int *)ticks)
+    {
+      /* Reset ticks_to_unblock */
+      th->ticks_to_unblock = THREAD_TICKS_TO_UNBLOCK_NO_TICKS;
+      /* Unblock the thread */
+      thread_unblock (th);
+    }
+}
