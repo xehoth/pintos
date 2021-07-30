@@ -147,4 +147,8 @@ int thread_get_load_avg (void);
 void
 thread_unblock_check (struct thread *th, void *ticks);
 
+/* Compare the priority between two threads in ready lists in order to
+ * implement a priority queue (high priority first) for ready list */
+bool thread_priority_comparator (const struct list_elem *a,
+                                 const struct list_elem *b, void *aux UNUSED);
 #endif /* threads/thread.h */
