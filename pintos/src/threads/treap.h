@@ -15,6 +15,7 @@ treap_rand ()
   return seed;
 }
 
+struct treap;
 // Treap Node
 struct treap_node
 {
@@ -22,6 +23,7 @@ struct treap_node
   void *data;
   uint32_t rank;
   int size;
+  struct treap *treap;
 };
 
 /**/
@@ -48,6 +50,7 @@ treap_node_init (struct treap_node *node, void *data)
   node->data = data;
   node->rank = treap_rand ();
   node->size = 1;
+  node->treap = NULL;
 }
 
 static void
@@ -169,9 +172,19 @@ treap_select (struct treap *t, int k)
   return p;
 }
 
+static bool
+treap_find (struct treap *t, struct treap_node *node)
+{
+  return treap_select (t, treap_lower_rank (t, node) + 1) == node;
+}
+
 static void
 treap_insert (struct treap *t, struct treap_node *node)
 {
+  if (treap_find (t, node))
+    return;
+  treap_node_init (node, node->data);
+  node->treap = t;
   int k = treap_lower_rank (t, node);
   struct treap_node *l, *r;
   treap_node_split (t->root, k, &l, &r);
@@ -181,6 +194,8 @@ treap_insert (struct treap *t, struct treap_node *node)
 static void
 treap_erase (struct treap *t, struct treap_node *node)
 {
+  if (!treap_find (t, node))
+    return;
   int k = treap_lower_rank (t, node);
   struct treap_node *l, *r, *L, *R;
   treap_node_split (t->root, k, &l, &r);
@@ -196,11 +211,24 @@ treap_size (struct treap *t)
   return 0;
 }
 
-typedef void treap_foreach_func (struct treap_node *node, void *aux);
+typedef void treap_node_action_func (struct treap_node *node, void *aux);
+static void
+treap_node_update (struct treap_node *node, treap_node_action_func *func,
+                   void *aux)
+{
+  struct treap *treap = node->treap;
+  if (!treap_find (treap, node))
+    return;
+  treap_erase (treap, node);
+  func (node, aux);
+  treap_node_init (node, node->data);
+  node->treap = treap;
+  treap_insert (treap, node);
+}
 
 static void
-treap_node_foreach_inorder (struct treap_node *node, treap_foreach_func *func,
-                            void *aux)
+treap_node_foreach_inorder (struct treap_node *node,
+                            treap_node_action_func *func, void *aux)
 {
   if (!node)
     return;
@@ -210,7 +238,7 @@ treap_node_foreach_inorder (struct treap_node *node, treap_foreach_func *func,
 }
 
 static void
-treap_foreach (struct treap *t, treap_foreach_func *func, void *aux)
+treap_foreach (struct treap *t, treap_node_action_func *func, void *aux)
 {
   treap_node_foreach_inorder (t->root, func, aux);
 }

@@ -182,10 +182,16 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  thread_tick ();
   // !BEGIN MODIFY
   thread_foreach (thread_unblock_check, (void *)&ticks);
+  if (thread_mlfqs)
+    {
+      thread_increase_recent_cpu ();
+      if (ticks % TIMER_FREQ == 0)
+        mlfqs_update ();
+    }
   // !END MODIFY
-  thread_tick ();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -258,3 +264,14 @@ real_time_delay (int64_t num, int32_t denom)
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000));
 }
+
+// !BEGIN MODIFY
+void
+mlfqs_update ()
+{
+  enum intr_level old_level = intr_disable ();
+  thread_calc_load_avg ();
+  thread_foreach (thread_calc_recent_cpu, NULL);
+  intr_set_level (old_level);
+}
+// !END MODIFY
