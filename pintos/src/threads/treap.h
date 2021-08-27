@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <debug.h>
 
 // XOR-SHIFT random algorithm for treap rank
 static uint32_t
@@ -181,6 +182,7 @@ treap_find (struct treap *t, struct treap_node *node)
 static void
 treap_insert (struct treap *t, struct treap_node *node)
 {
+  // ASSERT (!treap_find (t, node));
   if (treap_find (t, node))
     return;
   treap_node_init (node, node->data);
@@ -194,6 +196,7 @@ treap_insert (struct treap *t, struct treap_node *node)
 static void
 treap_erase (struct treap *t, struct treap_node *node)
 {
+  // ASSERT (treap_find (t, node));
   if (!treap_find (t, node))
     return;
   int k = treap_lower_rank (t, node);
@@ -217,6 +220,7 @@ treap_node_update (struct treap_node *node, treap_node_action_func *func,
                    void *aux)
 {
   struct treap *treap = node->treap;
+  // ASSERT (treap_find (treap, node));
   if (!treap_find (treap, node))
     return;
   treap_erase (treap, node);
