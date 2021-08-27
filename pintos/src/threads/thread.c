@@ -26,6 +26,7 @@
 // static struct list ready_list;
 static struct treap ready_treap;
 static uint64_t thread_ready_treap_fifo;
+static fp32_t load_avg;
 // !END MODIFY
 
 /* List of all processes.  Processes are added to this list
@@ -95,6 +96,7 @@ thread_init (void)
   // list_init (&ready_list);
   thread_ready_treap_fifo = 0;
   treap_init (&ready_treap, thread_priority_treap_cmp);
+  load_avg = int_to_fp32 (0);
   // !BEGIN MODIFY
   list_init (&all_list);
 
@@ -244,8 +246,8 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   // !BEGIN MODIFY
   t->ready_treap_fifo = ++thread_ready_treap_fifo;
-  ASSERT (t->ready_treap_node.data == t);
-  treap_insert (&ready_treap, &t->ready_treap_node);
+  ASSERT (t->node.data == t);
+  treap_insert (&ready_treap, &t->node);
   // list_push_back (&ready_list, &t->elem);
   // !END MODIFY
   t->status = THREAD_READY;
@@ -322,8 +324,8 @@ thread_yield (void)
     {
       // list_push_back (&ready_list, &cur->elem);
       cur->ready_treap_fifo = ++thread_ready_treap_fifo;
-      ASSERT (cur == cur->ready_treap_node.data);
-      treap_insert (&ready_treap, &cur->ready_treap_node);
+      ASSERT (cur == cur->node.data);
+      treap_insert (&ready_treap, &cur->node);
     }
   // !END MODIFY
   cur->status = THREAD_READY;
@@ -352,9 +354,19 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority)
 {
-  thread_current ()->priority = new_priority;
   // !BEGIN MODIFY
-  thread_yield ();
+  if (thread_mlfqs)
+    return;
+  enum intr_level old_level = intr_disable ();
+  struct thread *cur = thread_current ();
+  int old_priority = cur->priority;
+  cur->base_priority = new_priority;
+  if (!treap_size (&cur->holding_locks) || new_priority > old_priority)
+    {
+      cur->priority = new_priority;
+      thread_yield ();
+    }
+  intr_set_level (old_level);
   // !END MODIFY
 }
 
@@ -367,33 +379,33 @@ thread_get_priority (void)
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED)
+thread_set_nice (int nice)
 {
-  /* Not yet implemented. */
+  struct thread *cur = thread_current ();
+  cur->nice = nice;
+  thread_calc_priority (cur);
+  thread_yield ();
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void)
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current ()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void)
 {
-  /* Not yet implemented. */
-  return 0;
+  return fp32_to_int (fp32_mul_int (load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void)
 {
-  /* Not yet implemented. */
-  return 0;
+  return fp32_to_int (fp32_mul_int (thread_current ()->recent_cpu, 100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -482,7 +494,14 @@ init_thread (struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
   // !BEGIN MODIFY
   t->ready_treap_fifo = 0;
-  treap_node_init (&t->ready_treap_node, t);
+  treap_node_init (&t->node, t);
+
+  t->base_priority = priority;
+  treap_init (&t->holding_locks, lock_priority_threap_cmp);
+  t->waiting_lock = NULL;
+
+  t->nice = 0;
+  t->recent_cpu = int_to_fp32 (0);
   // !END MODIFY
 
   old_level = intr_disable ();
@@ -634,5 +653,143 @@ thread_unblock_check (struct thread *th, void *ticks)
       /* Unblock the thread */
       thread_unblock (th);
     }
+}
+
+void
+thread_hold_lock (struct lock *lock)
+{
+  enum intr_level old_level = intr_disable ();
+  struct thread *cur = thread_current ();
+  treap_insert (&cur->holding_locks, &lock->node);
+  if (lock->max_priority > cur->priority)
+    {
+      cur->priority = lock->max_priority;
+      thread_yield ();
+    }
+  intr_set_level (old_level);
+}
+
+void
+thread_release_lock (struct lock *lock)
+{
+  enum intr_level old_level = intr_disable ();
+  struct thread *cur = thread_current ();
+  treap_erase (&cur->holding_locks, &lock->node);
+  thread_update_priority (cur);
+  intr_set_level (old_level);
+}
+
+void
+thread_update_priority (struct thread *th)
+{
+  enum intr_level old_level = intr_disable ();
+  int max_priority = th->base_priority;
+  if (treap_size (&th->holding_locks))
+    {
+      int max_holding_priority
+          = ((struct lock *)treap_front (&th->holding_locks)->data)
+                ->max_priority;
+      if (max_holding_priority > max_priority)
+        max_priority = max_holding_priority;
+    }
+  if (th->status == THREAD_READY)
+    {
+      treap_node_update (&th->node, thread_treap_node_priority_update,
+                         (void *)&max_priority);
+      // treap_erase (&ready_treap, &th->node);
+      // th->priority = max_priority;
+      // treap_insert (&ready_treap, &th->node);
+    }
+  else if (th->status == THREAD_BLOCKED)
+    {
+      treap_node_update (&th->node, thread_treap_node_priority_update,
+                         (void *)&max_priority);
+    }
+  else
+    {
+      th->priority = max_priority;
+    }
+  intr_set_level (old_level);
+}
+
+bool
+thread_priority_list_cmp (const struct list_elem *a, const struct list_elem *b,
+                          void *aux UNUSED)
+{
+  return list_entry (a, struct thread, elem)->priority
+         < list_entry (b, struct thread, elem)->priority;
+}
+
+void
+thread_treap_node_priority_update (struct treap_node *node, void *max_priority)
+{
+  ((struct thread *)node->data)->priority = *(int *)max_priority;
+}
+
+void
+thread_increase_recent_cpu ()
+{
+  ASSERT (thread_mlfqs);
+  ASSERT (intr_context ());
+  struct thread *cur = thread_current ();
+  if (cur != idle_thread)
+    {
+      cur->recent_cpu += int_to_fp32 (1);
+      thread_calc_priority (cur);
+    }
+}
+
+void
+thread_calc_load_avg ()
+{
+  // load_avg = (59/60)*load_avg + (1/60)*ready_threads
+  int ready_threads
+      = treap_size (&ready_treap) + (thread_current () != idle_thread);
+  load_avg
+      = fp32_mul (fp32_div (int_to_fp32 (59), int_to_fp32 (60)), load_avg)
+        + fp32_mul_int (fp32_div_int (int_to_fp32 (1), 60), ready_threads);
+}
+
+void
+thread_calc_priority (struct thread *th)
+{
+  // priority = PRI_MAX - (recent_cpu / 4) - (nice * 2)
+  if (th == idle_thread)
+    return;
+  int priority = PRI_MAX - fp32_to_int (fp32_div_int (th->recent_cpu, 4))
+                 - th->nice * 2;
+  if (priority > PRI_MAX)
+    priority = PRI_MAX;
+  if (priority < PRI_MIN)
+    priority = PRI_MIN;
+  if (th->status == THREAD_READY)
+    {
+      treap_node_update (&th->node, thread_treap_node_priority_update,
+                         (void *)&priority);
+    }
+  else if (th->status == THREAD_BLOCKED)
+    {
+      treap_node_update (&th->node, thread_treap_node_priority_update,
+                         (void *)&priority);
+    }
+  else
+    {
+      th->priority = priority;
+    }
+}
+
+void
+thread_calc_recent_cpu (struct thread *th, void *aux UNUSED)
+{
+  // recent_cpu = (2*load_avg)/(2*load_avg + 1) * recent_cpu + nice
+  ASSERT (is_thread (th));
+  if (th == idle_thread)
+    return;
+  fp32_t load_avg_mul_2 = fp32_mul_int (load_avg, 2);
+  th->recent_cpu
+      = fp32_mul (fp32_div (load_avg_mul_2, load_avg_mul_2 + int_to_fp32 (1)),
+                  th->recent_cpu)
+        + int_to_fp32 (th->nice);
+  thread_calc_priority (th);
 }
 // !END MODIFY

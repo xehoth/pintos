@@ -1,6 +1,7 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
+#include "threads/fixed_point.h"
 #include "treap.h"
 #include <debug.h>
 #include <list.h>
@@ -92,10 +93,17 @@ struct thread
 
   /* Shared between thread.c and synch.c. */
   //  !BEGIN MODIFY
-  struct list_elem elem; /* List element. */
-  struct treap_node ready_treap_node;
+  struct list_elem elem;    /* List element. */
+  struct treap_node node;   /*Shared beteen thread.c and synch.c */
   int64_t ready_treap_fifo; /* Make cmp fifo when priority is equal */
   int64_t ticks_to_unblock; /* The time to unblock the sleeping thread */
+
+  int base_priority;
+  struct treap holding_locks;
+  struct lock *waiting_lock;
+
+  fp32_t recent_cpu;
+  int nice;
   //  !END MODIFY
 
 #ifdef USERPROG
@@ -147,5 +155,17 @@ bool thread_priority_treap_cmp (const struct treap_node *a,
                                 const struct treap_node *b);
 /* Check and unblock the thread whose ticks_to_unblock == ticks */
 void thread_unblock_check (struct thread *th, void *ticks);
+void thread_hold_lock (struct lock *);
+void thread_release_lock (struct lock *);
+void thread_update_priority (struct thread *);
+bool thread_priority_list_cmp (const struct list_elem *a,
+                               const struct list_elem *b, void *aux UNUSED);
+void thread_treap_node_priority_update (struct treap_node *node,
+                                        void *max_priority);
+/* mlfqs */
+void thread_calc_load_avg ();
+void thread_increase_recent_cpu ();
+void thread_calc_priority (struct thread *th);
+void thread_calc_recent_cpu (struct thread *th, void *aux UNUSED);
 // !END MODIFY
 #endif /* threads/thread.h */
