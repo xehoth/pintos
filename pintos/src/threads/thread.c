@@ -767,6 +767,11 @@ thread_calc_priority (struct thread *th)
       treap_node_update (&th->node, thread_treap_node_priority_update,
                          (void *)&priority);
     }
+  else if (th->status == THREAD_BLOCKED)
+    {
+      treap_node_update (&th->node, thread_treap_node_priority_update,
+                         (void *)&priority);
+    }
   else
     {
       th->priority = priority;
