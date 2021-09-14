@@ -26,7 +26,4 @@ void timer_ndelay (int64_t nanoseconds);
 
 void timer_print_stats (void);
 
-// !BEGIN MODIFY
-void mlfqs_update ();
-// !END MODIFY
 #endif /* devices/timer.h */

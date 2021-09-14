@@ -1,1 +1,3 @@
 BasedOnStyle: GNU
+UseTab: Never
+IndentWidth: 2

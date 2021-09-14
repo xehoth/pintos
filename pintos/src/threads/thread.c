@@ -22,12 +22,7 @@
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
-//  !BEGIN MODIFY
-// static struct list ready_list;
-static struct treap ready_treap;
-static uint64_t thread_ready_treap_fifo;
-static fp32_t load_avg;
-// !END MODIFY
+static struct list ready_list;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -80,10 +75,13 @@ static tid_t allocate_tid (void);
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
    was careful to put the bottom of the stack at a page boundary.
+
    Also initializes the run queue and the tid lock.
+
    After calling this function, be sure to initialize the page
    allocator before trying to create any threads with
    thread_create().
+
    It is not safe to call thread_current() until this function
    finishes. */
 void
@@ -92,12 +90,7 @@ thread_init (void)
   ASSERT (intr_get_level () == INTR_OFF);
 
   lock_init (&tid_lock);
-  // !BEGIN MODIFY
-  // list_init (&ready_list);
-  thread_ready_treap_fifo = 0;
-  treap_init (&ready_treap, thread_priority_treap_cmp);
-  load_avg = int_to_fp32 (0);
-  // !BEGIN MODIFY
+  list_init (&ready_list);
   list_init (&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -158,12 +151,14 @@ thread_print_stats (void)
    PRIORITY, which executes FUNCTION passing AUX as the argument,
    and adds it to the ready queue.  Returns the thread identifier
    for the new thread, or TID_ERROR if creation fails.
+
    If thread_start() has been called, then the new thread may be
    scheduled before thread_create() returns.  It could even exit
    before thread_create() returns.  Contrariwise, the original
    thread may run for any amount of time before the new thread is
    scheduled.  Use a semaphore or some other form of
    synchronization if you need to ensure ordering.
+
    The code provided sets the new thread's `priority' member to
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
@@ -188,6 +183,17 @@ thread_create (const char *name, int priority, thread_func *function,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+  // !BEGIN MODIFY
+  // prevent main and idle
+  if (tid >= 3)
+    {
+      t->process = process_create (t);
+      if (!t->process)
+        return TID_ERROR;
+      t->parent = thread_current ();
+    }
+  // !END MODIFY
+
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -206,15 +212,12 @@ thread_create (const char *name, int priority, thread_func *function,
   /* Add to run queue. */
   thread_unblock (t);
 
-  // !BEGIN MODIFY
-  /* Higher priority for the created thread, yield current thread */
-  thread_yield ();
-  // !END MODIFY
   return tid;
 }
 
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
+
    This function must be called with interrupts turned off.  It
    is usually a better idea to use one of the synchronization
    primitives in synch.h. */
@@ -231,6 +234,7 @@ thread_block (void)
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
+
    This function does not preempt the running thread.  This can
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
@@ -244,12 +248,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  // !BEGIN MODIFY
-  t->ready_treap_fifo = ++thread_ready_treap_fifo;
-  ASSERT (t->node.data == t);
-  treap_insert (&ready_treap, &t->node);
-  // list_push_back (&ready_list, &t->elem);
-  // !END MODIFY
+  list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -319,15 +318,8 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  // !BEGIN MODIFY
   if (cur != idle_thread)
-    {
-      // list_push_back (&ready_list, &cur->elem);
-      cur->ready_treap_fifo = ++thread_ready_treap_fifo;
-      ASSERT (cur == cur->node.data);
-      treap_insert (&ready_treap, &cur->node);
-    }
-  // !END MODIFY
+    list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -354,20 +346,7 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority)
 {
-  // !BEGIN MODIFY
-  if (thread_mlfqs)
-    return;
-  enum intr_level old_level = intr_disable ();
-  struct thread *cur = thread_current ();
-  int old_priority = cur->priority;
-  cur->base_priority = new_priority;
-  if (!treap_size (&cur->holding_locks) || new_priority > old_priority)
-    {
-      cur->priority = new_priority;
-      thread_yield ();
-    }
-  intr_set_level (old_level);
-  // !END MODIFY
+  thread_current ()->priority = new_priority;
 }
 
 /* Returns the current thread's priority. */
@@ -379,36 +358,37 @@ thread_get_priority (void)
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice)
+thread_set_nice (int nice UNUSED)
 {
-  struct thread *cur = thread_current ();
-  cur->nice = nice;
-  thread_calc_priority (cur);
-  thread_yield ();
+  /* Not yet implemented. */
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void)
 {
-  return thread_current ()->nice;
+  /* Not yet implemented. */
+  return 0;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void)
 {
-  return fp32_to_int (fp32_mul_int (load_avg, 100));
+  /* Not yet implemented. */
+  return 0;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void)
 {
-  return fp32_to_int (fp32_mul_int (thread_current ()->recent_cpu, 100));
+  /* Not yet implemented. */
+  return 0;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
+
    The idle thread is initially put on the ready list by
    thread_start().  It will be scheduled once initially, at which
    point it initializes idle_thread, "up"s the semaphore passed
@@ -430,6 +410,7 @@ idle (void *idle_started_ UNUSED)
       thread_block ();
 
       /* Re-enable interrupts and wait for the next one.
+
          The `sti' instruction disables interrupts until the
          completion of the next instruction, so these two
          instructions are executed atomically.  This atomicity is
@@ -437,6 +418,7 @@ idle (void *idle_started_ UNUSED)
          between re-enabling interrupts and waiting for the next
          one to occur, wasting as much as one clock tick worth of
          time.
+
          See [IA32-v2a] "HLT", [IA32-v2b] "STI", and [IA32-v3a]
          7.11.1 "HLT Instruction". */
       asm volatile("sti; hlt" : : : "memory");
@@ -492,17 +474,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *)t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-  // !BEGIN MODIFY
-  t->ready_treap_fifo = 0;
-  treap_node_init (&t->node, t);
-
-  t->base_priority = priority;
-  treap_init (&t->holding_locks, lock_priority_threap_cmp);
-  t->waiting_lock = NULL;
-
-  t->nice = 0;
-  t->recent_cpu = int_to_fp32 (0);
-  // !END MODIFY
+  /* Initialize ticks_to_unblock to not unblock */
+  t->ticks_to_unblock = THREAD_TICKS_TO_UNBLOCK_NO_TICKS;
+  process_thread_init (t);
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -530,33 +504,26 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void)
 {
-  // !BEGIN MODIFY
-  // if (list_empty (&ready_list))
-  //   return idle_thread;
-  // else
-  //   return list_entry (list_pop_front (&ready_list), struct thread, elem);
-  if (treap_size (&ready_treap) == 0)
-    {
-      return idle_thread;
-    }
+  if (list_empty (&ready_list))
+    return idle_thread;
   else
-    {
-      return (struct thread *)(treap_pop_front (&ready_treap)->data);
-    }
-  // !END MODIFY
+    return list_entry (list_pop_front (&ready_list), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
    tables, and, if the previous thread is dying, destroying it.
+
    At this function's invocation, we just switched from thread
    PREV, the new thread is already running, and interrupts are
    still disabled.  This function is normally invoked by
    thread_schedule() as its final action before returning, but
    the first time a thread is scheduled it is called by
    switch_entry() (see switch.S).
+
    It's not safe to call printf() until the thread switch is
    complete.  In practice that means that printf()s should be
    added at the end of the function.
+
    After this function and its caller returns, the thread switch
    is complete. */
 void
@@ -593,6 +560,7 @@ thread_schedule_tail (struct thread *prev)
    the running process's state must have been changed from
    running to some other state.  This function finds another
    thread to run and switches to it.
+
    It's not safe to call printf() until thread_schedule_tail()
    has completed. */
 static void
@@ -601,6 +569,7 @@ schedule (void)
   struct thread *cur = running_thread ();
   struct thread *next = next_thread_to_run ();
   struct thread *prev = NULL;
+
   ASSERT (intr_get_level () == INTR_OFF);
   ASSERT (cur->status != THREAD_RUNNING);
   ASSERT (is_thread (next));
@@ -628,19 +597,6 @@ allocate_tid (void)
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
-// !BEGIN MODIFY
-bool
-thread_priority_treap_cmp (const struct treap_node *a,
-                           const struct treap_node *b)
-{
-  const struct thread *th_a = (const struct thread *)a->data;
-  const struct thread *th_b = (const struct thread *)b->data;
-
-  if (th_a->priority != th_b->priority)
-    return th_a->priority > th_b->priority;
-  return th_a->ready_treap_fifo < th_b->ready_treap_fifo;
-}
-
 /* Check and unblock the thread whose ticks_to_unblock == ticks */
 void
 thread_unblock_check (struct thread *th, void *ticks)
@@ -654,142 +610,18 @@ thread_unblock_check (struct thread *th, void *ticks)
       thread_unblock (th);
     }
 }
-
-void
-thread_hold_lock (struct lock *lock)
+// !BEGIN MODIFY
+struct thread *
+get_thread (tid_t tid)
 {
-  enum intr_level old_level = intr_disable ();
-  struct thread *cur = thread_current ();
-  treap_insert (&cur->holding_locks, &lock->node);
-  if (lock->max_priority > cur->priority)
+  struct list_elem *e;
+  for (e = list_begin (&all_list); e != list_end (&all_list);
+       e = list_next (e))
     {
-      cur->priority = lock->max_priority;
-      thread_yield ();
+      struct thread *t = list_entry (e, struct thread, allelem);
+      if (t->tid == tid)
+        return t;
     }
-  intr_set_level (old_level);
-}
-
-void
-thread_release_lock (struct lock *lock)
-{
-  enum intr_level old_level = intr_disable ();
-  struct thread *cur = thread_current ();
-  treap_erase (&cur->holding_locks, &lock->node);
-  thread_update_priority (cur);
-  intr_set_level (old_level);
-}
-
-void
-thread_update_priority (struct thread *th)
-{
-  enum intr_level old_level = intr_disable ();
-  int max_priority = th->base_priority;
-  if (treap_size (&th->holding_locks))
-    {
-      int max_holding_priority
-          = ((struct lock *)treap_front (&th->holding_locks)->data)
-                ->max_priority;
-      if (max_holding_priority > max_priority)
-        max_priority = max_holding_priority;
-    }
-  if (th->status == THREAD_READY)
-    {
-      treap_node_update (&th->node, thread_treap_node_priority_update,
-                         (void *)&max_priority);
-      // treap_erase (&ready_treap, &th->node);
-      // th->priority = max_priority;
-      // treap_insert (&ready_treap, &th->node);
-    }
-  else if (th->status == THREAD_BLOCKED)
-    {
-      treap_node_update (&th->node, thread_treap_node_priority_update,
-                         (void *)&max_priority);
-    }
-  else
-    {
-      th->priority = max_priority;
-    }
-  intr_set_level (old_level);
-}
-
-bool
-thread_priority_list_cmp (const struct list_elem *a, const struct list_elem *b,
-                          void *aux UNUSED)
-{
-  return list_entry (a, struct thread, elem)->priority
-         < list_entry (b, struct thread, elem)->priority;
-}
-
-void
-thread_treap_node_priority_update (struct treap_node *node, void *max_priority)
-{
-  ((struct thread *)node->data)->priority = *(int *)max_priority;
-}
-
-void
-thread_increase_recent_cpu ()
-{
-  ASSERT (thread_mlfqs);
-  ASSERT (intr_context ());
-  struct thread *cur = thread_current ();
-  if (cur != idle_thread)
-    {
-      cur->recent_cpu += int_to_fp32 (1);
-      thread_calc_priority (cur);
-    }
-}
-
-void
-thread_calc_load_avg ()
-{
-  // load_avg = (59/60)*load_avg + (1/60)*ready_threads
-  int ready_threads
-      = treap_size (&ready_treap) + (thread_current () != idle_thread);
-  load_avg
-      = fp32_mul (fp32_div (int_to_fp32 (59), int_to_fp32 (60)), load_avg)
-        + fp32_mul_int (fp32_div_int (int_to_fp32 (1), 60), ready_threads);
-}
-
-void
-thread_calc_priority (struct thread *th)
-{
-  // priority = PRI_MAX - (recent_cpu / 4) - (nice * 2)
-  if (th == idle_thread)
-    return;
-  int priority = PRI_MAX - fp32_to_int (fp32_div_int (th->recent_cpu, 4))
-                 - th->nice * 2;
-  if (priority > PRI_MAX)
-    priority = PRI_MAX;
-  if (priority < PRI_MIN)
-    priority = PRI_MIN;
-  if (th->status == THREAD_READY)
-    {
-      treap_node_update (&th->node, thread_treap_node_priority_update,
-                         (void *)&priority);
-    }
-  else if (th->status == THREAD_BLOCKED)
-    {
-      treap_node_update (&th->node, thread_treap_node_priority_update,
-                         (void *)&priority);
-    }
-  else
-    {
-      th->priority = priority;
-    }
-}
-
-void
-thread_calc_recent_cpu (struct thread *th, void *aux UNUSED)
-{
-  // recent_cpu = (2*load_avg)/(2*load_avg + 1) * recent_cpu + nice
-  ASSERT (is_thread (th));
-  if (th == idle_thread)
-    return;
-  fp32_t load_avg_mul_2 = fp32_mul_int (load_avg, 2);
-  th->recent_cpu
-      = fp32_mul (fp32_div (load_avg_mul_2, load_avg_mul_2 + int_to_fp32 (1)),
-                  th->recent_cpu)
-        + int_to_fp32 (th->nice);
-  thread_calc_priority (th);
+  return NULL;
 }
 // !END MODIFY
