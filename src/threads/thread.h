@@ -7,22 +7,27 @@
 
 /* States in a thread's life cycle. */
 enum thread_status
-  {
-    THREAD_RUNNING,     /* Running thread. */
-    THREAD_READY,       /* Not running but ready to run. */
-    THREAD_BLOCKED,     /* Waiting for an event to trigger. */
-    THREAD_DYING        /* About to be destroyed. */
-  };
+{
+  THREAD_RUNNING, /* Running thread. */
+  THREAD_READY,   /* Not running but ready to run. */
+  THREAD_BLOCKED, /* Waiting for an event to trigger. */
+  THREAD_DYING    /* About to be destroyed. */
+};
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
-#define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
+#define TID_ERROR ((tid_t)-1) /* Error value for tid_t. */
 
 /* Thread priorities. */
-#define PRI_MIN 0                       /* Lowest priority. */
-#define PRI_DEFAULT 31                  /* Default priority. */
-#define PRI_MAX 63                      /* Highest priority. */
+#define PRI_MIN 0      /* Lowest priority. */
+#define PRI_DEFAULT 31 /* Default priority. */
+#define PRI_MAX 63     /* Highest priority. */
+
+// !BEGIN MODIFY
+/* Init value of ticks_to_unblock, shouldn't unblock thread of this value */
+#define THREAD_TICKS_TO_UNBLOCK_NO_TICKS (-1)
+// !END MODIFY
 
 /* A kernel thread or user process.
 
@@ -81,26 +86,35 @@ typedef int tid_t;
    ready state is on the run queue, whereas only a thread in the
    blocked state is on a semaphore wait list. */
 struct thread
-  {
-    /* Owned by thread.c. */
-    tid_t tid;                          /* Thread identifier. */
-    enum thread_status status;          /* Thread state. */
-    char name[16];                      /* Name (for debugging purposes). */
-    uint8_t *stack;                     /* Saved stack pointer. */
-    int priority;                       /* Priority. */
-    struct list_elem allelem;           /* List element for all threads list. */
+{
+  /* Owned by thread.c. */
+  tid_t tid;                 /* Thread identifier. */
+  enum thread_status status; /* Thread state. */
+  char name[16];             /* Name (for debugging purposes). */
+  uint8_t *stack;            /* Saved stack pointer. */
+  int priority;              /* Priority. */
+  struct list_elem allelem;  /* List element for all threads list. */
 
-    /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
+  /* Shared between thread.c and synch.c. */
+  struct list_elem elem; /* List element. */
 
 #ifdef USERPROG
-    /* Owned by userprog/process.c. */
-    uint32_t *pagedir;                  /* Page directory. */
+  /* Owned by userprog/process.c. */
+  uint32_t *pagedir; /* Page directory. */
+
+  struct list child_list;
+  struct thread *parent;
+  struct process *process;
+  struct list open_files;
+  int fd;
+  struct file *self_file; /* File for process self */
 #endif
 
-    /* Owned by thread.c. */
-    unsigned magic;                     /* Detects stack overflow. */
-  };
+  int64_t ticks_to_unblock; /* The time to unblock the sleeping thread */
+
+  /* Owned by thread.c. */
+  unsigned magic; /* Detects stack overflow. */
+};
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -137,5 +151,11 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+// !BEGIN MODIFY
+/* Check and unblock the thread whose ticks_to_unblock == ticks */
+void thread_unblock_check (struct thread *th, void *ticks);
+struct thread *get_thread (tid_t tid);
+// !END MODIFY
 
 #endif /* threads/thread.h */
