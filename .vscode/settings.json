@@ -1,8 +1,0 @@
-{
-  "files.associations": {
-    "thread.h": "c",
-    "fixed_point.h": "c",
-    "syscall.h": "c",
-    "pagedir.h": "c"
-  }
-}
