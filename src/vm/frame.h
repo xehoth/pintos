@@ -6,7 +6,7 @@
 
 typedef struct frame_table_entry
 {
-  void *frame;      /* Frame address (Physical) */
+  void *frame;           /* Frame address (Physical) */
   struct list_elem elem; /* List elem used in frame table */
 } frame_table_entry_t;
 
