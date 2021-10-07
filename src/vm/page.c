@@ -5,6 +5,11 @@
 extern bool install_page (void *, void *, bool);
 
 bool
+try_get_page (void *fault_addr)
+{
+}
+
+bool
 grow_stack (void *addr)
 {
   void *kpage = palloc_get_page (PAL_USER);
