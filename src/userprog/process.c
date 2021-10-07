@@ -19,6 +19,8 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "vm/frame.h"
+#include "vm/page.h"
 
 
 // !!!BEGIN MODIFY
@@ -38,6 +40,7 @@ typedef union
 static void parse_args (esp_t *esp, char *args_str, char *save_ptr);
 static bool deny_write_to_self (struct thread *cur, const char *name);
 static void recover_write_to_self (struct thread *cur);
+static void process_remove_all_frames (tid_t tid);
 // !!!END MODIFY
 
 static thread_func start_process NO_RETURN;
@@ -206,6 +209,10 @@ process_exit (void)
   if (cur->process->status != PROCESS_ERROR)
     cur->process->status = PROCESS_EXITED;
   recover_write_to_self (cur);
+
+  sup_table_free (&cur->sup_page_table);
+  process_remove_all_frames (cur->tid);
+
   sema_up (&cur->process->wait_sema);
   // !END MODIFY
 }
@@ -670,5 +677,25 @@ recover_write_to_self (struct thread *cur)
       file_close (cur->self_file);
       cur->self_file = NULL;
     }
+}
+
+static bool
+frame_table_entry_equal_pid (frame_table_entry_t *entry, void *pid)
+{
+  return entry->owner == *(tid_t *)pid;
+}
+
+static bool
+do_free_frame_table_entry (frame_table_entry_t *entry)
+{
+  list_remove (&entry->elem);
+  free (entry);
+  return false;
+}
+
+static void process_remove_all_frames (tid_t pid)
+{
+  frame_table_foreach_if (frame_table_entry_equal_pid, &pid,
+                          do_free_frame_table_entry);
 }
 // !END MODIFY

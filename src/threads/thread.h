@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "vm/page.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -108,6 +109,10 @@ struct thread
   struct list open_files;
   int fd;
   struct file *self_file; /* File for process self */
+#endif
+
+#ifdef VM
+  sup_page_table_t sup_page_table; /* The supplementary page table */
 #endif
 
   int64_t ticks_to_unblock; /* The time to unblock the sleeping thread */
