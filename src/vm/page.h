@@ -11,6 +11,7 @@ typedef struct sup_page_table_entry
   void *addr;                 /* User virtual address */
   uint64_t access_time;       /* Last access time for LRU */
   struct hash_elem hash_elem; /* Hash table elem for sup page table */
+  int swap_idx;               /* Index of the begining sector in swap space */
 } sup_page_table_entry_t;
 
 /* Allocate and init a new sup table entry */

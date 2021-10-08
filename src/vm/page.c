@@ -6,6 +6,8 @@
 #include "threads/malloc.h"
 #include "devices/timer.h"
 
+#define NOT_IN_SWAP (-1)
+
 extern bool install_page (void *, void *, bool);
 
 /* Allocate and init a new sup table entry */
@@ -18,6 +20,7 @@ new_sup_table_entry (void *addr, uint64_t access_time)
     return NULL;
   entry->addr = pg_round_down (addr);
   entry->access_time = access_time;
+  entry->swap_idx = NOT_IN_SWAP;
   return entry;
 }
 
@@ -93,7 +96,10 @@ try_get_page (void *fault_addr)
     }
   else
     {
-      // TODO: Load page
+      // TODO:
+      // eviction
+      // load page back
+      
     }
   return false;
 }
@@ -124,3 +130,4 @@ grow_stack (void *addr)
     }
   return true;
 }
+

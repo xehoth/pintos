@@ -34,4 +34,9 @@ void frame_table_init (void);
 void *frame_new_page (sup_page_table_entry_t *table_entry);
 /* Free a page and update the frame table */
 void frame_free_page (void *page);
+/* evict a frame to swap space, and return that frame entry */
+frame_table_entry_t *evict_one_frame (void);
+/* select a frame base on LRU */
+frame_table_entry_t *select_LRU (void);
+
 #endif
