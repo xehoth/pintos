@@ -401,7 +401,7 @@ syscall_mmap (int fd, void *addr)
   /* No file or has a length of zero bytes */
   if (!f_entry->file || !(file_size = file_length (f_entry->file)))
     return -1;
-  struct file *f = do_file_reopen (f_entry->file);
+  struct file *f = NULL;/*do_file_reopen (f_entry->file);*/
   /* Failed to reopen */
   if (!f)
     return -1;
