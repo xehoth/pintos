@@ -153,7 +153,9 @@ page_fault (struct intr_frame *f)
 
   //   !BEGIN MODIFY
   /* Invalid address */
-  if (!fault_addr || !not_present || (is_kernel_vaddr (fault_addr) && user))
+  if (!fault_addr || !not_present || (is_kernel_vaddr (fault_addr) && user)
+      || (uint32_t)fault_addr < 0x08048000
+      || (uint32_t)fault_addr < f->esp - 32)
     {
       syscall_exit (-1);
     }

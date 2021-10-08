@@ -115,6 +115,7 @@ start_process (void *file_name_)
   success = load (file_name, &if_.eip, &if_.esp);
 
   struct thread *cur = thread_current ();
+  sup_table_init (&cur->sup_page_table);
   /* If load failed, quit. */
   if (!success)
     {
