@@ -1,5 +1,6 @@
 #include "vm/frame.h"
 #include "vm/swap.h"
+#include "userprog/pagedir.h"
 #include "threads/palloc.h"
 #include "threads/malloc.h"
 #include "threads/synch.h"
@@ -67,27 +68,27 @@ frame_new_page (sup_page_table_entry_t *table_entry)
   if (!table_entry)
     return NULL;
   void *kernal_page = palloc_get_page (PAL_USER);
-  frame_table_entry_t *entry;
+  frame_table_entry_t *frame;
   if (!kernal_page)
     {
       /* evict one frame and reuse this frame table entry */
-      entry = evict_one_frame ();
+      frame = evict_one_frame ();
       /* set tid and sup table entry */
-      entry->owner = thread_tid ();
-      entry->sup_table_entry = table_entry;
-      return entry->frame;
+      frame->owner = thread_tid ();
+      frame->sup_table_entry = table_entry;
+      return frame->frame;
     }
   /* Create a new frame table entry */
-  entry = new_frame_table_entry (kernal_page, thread_tid (), table_entry);
+  frame = new_frame_table_entry (kernal_page, thread_tid (), table_entry);
   /* New frame table entry failed */
-  if (!entry)
+  if (!frame)
     {
       /* Avoid memory leak */
       palloc_free_page (kernal_page);
       return NULL;
     }
   /* Add to frame table */
-  list_push_back (&frame_table, &entry->elem);
+  list_push_back (&frame_table, &frame->elem);
   return kernal_page;
 }
 
@@ -116,13 +117,22 @@ frame_table_entry_t *
 evict_one_frame ()
 {
   /* choose a frame entry based on LRU */
-  frame_table_entry_t *entry; // TODO
-  write_frame_to_block (entry);
-  return entry;
+  struct list_elem *min_elem
+      = list_min (&frame_table, frame_access_time_less, NULL);
+  frame_table_entry_t *frame
+      = list_entry (min_elem, frame_table_entry_t, elem);
+  struct thread *cur = thread_current ();
+  pagedir_clear_page (cur->pagedir, frame->sup_table_entry->addr);
+  write_frame_to_block (frame);
+  return frame;
 }
 
-frame_table_entry_t *
-select_LRU ()
+bool
+frame_access_time_less (const struct list_elem *a, const struct list_elem *b,
+                        void *aux UNUSED)
 {
-  // TODO
+  frame_table_entry_t *frame_a = list_entry (a, frame_table_entry_t, elem);
+  frame_table_entry_t *frame_b = list_entry (b, frame_table_entry_t, elem);
+  return frame_a->sup_table_entry->access_time
+         < frame_b->sup_table_entry->access_time;
 }

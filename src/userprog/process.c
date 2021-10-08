@@ -22,7 +22,6 @@
 #include "vm/frame.h"
 #include "vm/page.h"
 
-
 // !!!BEGIN MODIFY
 typedef void (*ret_addr_t) (void);
 
@@ -115,7 +114,6 @@ start_process (void *file_name_)
   success = load (file_name, &if_.eip, &if_.esp);
 
   struct thread *cur = thread_current ();
-  sup_table_init (&cur->sup_page_table);
   /* If load failed, quit. */
   if (!success)
     {
@@ -233,7 +231,7 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
-
+
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
 
@@ -414,7 +412,7 @@ done:
   file_close (file);
   return success;
 }
-
+
 /* load() helpers. */
 
 bool install_page (void *upage, void *kpage, bool writable);
@@ -483,40 +481,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
-  while (read_bytes > 0 || zero_bytes > 0)
-    {
-      /* Calculate how to fill this page.
-         We will read PAGE_READ_BYTES bytes from FILE
-         and zero the final PAGE_ZERO_BYTES bytes. */
-      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-      size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
-        return false;
-
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int)page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false;
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable))
-        {
-          palloc_free_page (kpage);
-          return false;
-        }
-
-      /* Advance. */
-      read_bytes -= page_read_bytes;
-      zero_bytes -= page_zero_bytes;
-      upage += PGSIZE;
-    }
-  return true;
+  return lazy_load (file, ofs, upage, read_bytes, zero_bytes, writable);
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
@@ -694,7 +659,8 @@ do_free_frame_table_entry (frame_table_entry_t *entry)
   return false;
 }
 
-static void process_remove_all_frames (tid_t pid)
+static void
+process_remove_all_frames (tid_t pid)
 {
   frame_table_foreach_if (frame_table_entry_equal_pid, &pid,
                           do_free_frame_table_entry);

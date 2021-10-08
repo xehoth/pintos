@@ -12,6 +12,12 @@ typedef struct sup_page_table_entry
   uint64_t access_time;       /* Last access time for LRU */
   struct hash_elem hash_elem; /* Hash table elem for sup page table */
   int swap_idx;               /* Index of the begining sector in swap space */
+  bool from_file;
+  struct file *file;
+  int32_t ofs;
+  uint32_t read_bytes;
+  uint32_t zero_bytes;
+  bool writable;
 } sup_page_table_entry_t;
 
 /* Allocate and init a new sup table entry */
@@ -29,7 +35,15 @@ bool page_less_func (const struct hash_elem *a, const struct hash_elem *b,
                      void *aux UNUSED);
 
 /* Try to get a page which the fault addr refers */
-bool try_get_page (void *fault_addr);
+bool try_get_page (void *fault_addr, void *esp);
 /* Grow the stack with given required addr */
 bool grow_stack (void *addr);
+
+bool load_from_swap (void *addr, sup_page_table_entry_t *table_entry);
+
+bool lazy_load (struct file *file, int32_t ofs, uint8_t *upage,
+                uint32_t read_bytes, uint32_t zero_bytes, bool writable);
+
+bool load_from_file (void *addr, sup_page_table_entry_t *table_entry);
+
 #endif

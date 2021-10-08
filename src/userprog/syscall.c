@@ -13,7 +13,7 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 
-static struct lock filesys_lock;
+struct lock filesys_lock;
 
 struct list_file
 {
@@ -383,8 +383,8 @@ mmap_check_input (int fd, void *addr)
 static bool
 mmap_reopen_file (int fd, struct file **f_ptr)
 {
-  struct list_file *f = get_file(fd);
-  off_t file_size = file_length(f->file);
+  struct list_file *f = get_file (fd);
+  off_t file_size = file_length (f->file);
   // TODO:
   return false;
 }
@@ -401,7 +401,7 @@ syscall_mmap (int fd, void *addr)
   /* No file or has a length of zero bytes */
   if (!f_entry->file || !(file_size = file_length (f_entry->file)))
     return -1;
-  struct file *f = NULL;/*do_file_reopen (f_entry->file);*/
+  struct file *f = NULL; /*do_file_reopen (f_entry->file);*/
   /* Failed to reopen */
   if (!f)
     return -1;

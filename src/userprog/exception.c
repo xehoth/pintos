@@ -154,12 +154,11 @@ page_fault (struct intr_frame *f)
   //   !BEGIN MODIFY
   /* Invalid address */
   if (!fault_addr || !not_present || (is_kernel_vaddr (fault_addr) && user)
-      || (uint32_t)fault_addr < 0x08048000
-      || (uint32_t)fault_addr < f->esp - 32)
+      || (uint32_t)fault_addr < 0x08048000)
     {
       syscall_exit (-1);
     }
-  if (!try_get_page (fault_addr))
+  if (!try_get_page (fault_addr, f->esp))
     {
       /* Failed to bring the page */
       syscall_exit (-1);
