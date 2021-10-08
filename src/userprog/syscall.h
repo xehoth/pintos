@@ -18,4 +18,7 @@ void syscall_seek (int fd, unsigned position);
 unsigned syscall_tell (int fd);
 void syscall_close (int fd);
 
+typedef int mapid_t;
+mapid_t syscall_mmap (int fd, void *addr);
+void syscall_munmap (mapid_t mapping);
 #endif /* userprog/syscall.h */

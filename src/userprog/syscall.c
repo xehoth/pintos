@@ -13,7 +13,6 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 
-
 static struct lock filesys_lock;
 
 struct list_file
@@ -121,6 +120,18 @@ syscall_handler (struct intr_frame *f)
       {
         get_args (f, args, 1);
         syscall_close (*(int *)args[0]);
+        break;
+      }
+    case SYS_MMAP:
+      {
+        get_args (f, args, 2);
+        f->eax = syscall_mmap (*(int *)args[0], *(void **)args[1]);
+        break;
+      }
+    case SYS_MUNMAP:
+      {
+        get_args (f, args, 1);
+        syscall_munmap (*(mapid_t *)args[0]);
         break;
       }
     default:
@@ -360,4 +371,45 @@ syscall_close (int fd)
   lock_release (&filesys_lock);
   list_remove (&f->elem);
   free (f);
+}
+
+static bool
+mmap_check_input (int fd, void *addr)
+{
+  /* Not console and multiples of page size */
+  return fd >= 2 && (uint32_t)addr % PGSIZE == 0;
+}
+
+static bool
+mmap_reopen_file (int fd, struct file **f_ptr)
+{
+  struct list_file *f = get_file(fd);
+  off_t file_size = file_length(f->file);
+  // TODO:
+  return false;
+}
+
+mapid_t
+syscall_mmap (int fd, void *addr)
+{
+  check_valid_ptr (addr);
+  /* Console or not multiples of page size */
+  if (fd < 2 || (uint32_t)addr % PGSIZE)
+    return -1;
+  struct list_file *f_entry = get_file (fd);
+  off_t file_size = 0;
+  /* No file or has a length of zero bytes */
+  if (!f_entry->file || !(file_size = file_length (f_entry->file)))
+    return -1;
+  struct file *f = do_file_reopen (f_entry->file);
+  /* Failed to reopen */
+  if (!f)
+    return -1;
+  // TODO:
+}
+
+void
+syscall_munmap (mapid_t mapping)
+{
+  // TODO:
 }
