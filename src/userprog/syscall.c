@@ -28,6 +28,8 @@ static void check_valid_mem (const void *start, size_t size);
 static void check_valid_str (const char *str);
 static void get_args (struct intr_frame *f, void *args[], int argc);
 
+static void *checker_esp;
+
 void
 syscall_init (void)
 {
@@ -39,6 +41,7 @@ static void
 syscall_handler (struct intr_frame *f)
 {
   check_valid_mem (f->esp, sizeof (void *));
+  checker_esp = f->esp;
   void *args[3];
   switch (*(int *)f->esp)
     {
@@ -145,20 +148,28 @@ syscall_handler (struct intr_frame *f)
 static void
 check_valid_ptr (const void *ptr)
 {
-  if (!ptr || !is_user_vaddr (ptr) || ptr < (void *)0x08048000
-      || !pagedir_get_page (thread_current ()->pagedir, ptr))
+  if (!ptr || !is_user_vaddr (ptr) || ptr < (void *)0x08048000)
     {
       syscall_exit (-1);
+    }
+  if (!pagedir_get_page (thread_current ()->pagedir, ptr))
+    {
+      if (!try_get_page (ptr, checker_esp))
+        {
+          syscall_exit (-1);
+        }
     }
 }
 
 static void
 check_valid_mem (const void *start, size_t size)
 {
-  const char *ptr = start;
+  void *last_page = NULL;
   for (size_t i = 0; i < size; ++i)
     {
-      check_valid_ptr ((const void *)ptr++);
+      void *cur_page = pg_round_down (start + i);
+      if (cur_page != last_page)
+        check_valid_ptr (last_page = cur_page);
     }
 }
 
