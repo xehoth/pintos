@@ -31,7 +31,7 @@ bool frame_table_entry_equal_page (frame_table_entry_t *entry, void *page);
 /* Init frame table */
 void frame_table_init (void);
 /* Get a new page and maintain info in frame table */
-void *frame_new_page (sup_page_table_entry_t *table_entry);
+frame_table_entry_t *frame_new_page (sup_page_table_entry_t *table_entry);
 /* Free a page and update the frame table */
 void frame_free_page (void *page);
 /* evict a frame to swap space, and return that frame entry */

@@ -110,11 +110,11 @@ try_get_page (void *fault_addr, void *esp)
     }
   else if (table_entry->from_file)
     {
-      load_from_file (fault_addr, table_entry);
+      return load_from_file (fault_addr, table_entry);
     }
   else
     {
-      load_from_swap (fault_addr, table_entry);
+      return load_from_swap (fault_addr, table_entry);
     }
 }
 
@@ -126,13 +126,14 @@ grow_stack (void *addr)
       = new_sup_table_entry (addr, timer_ticks ());
   if (!table_entry)
     return false;
-  void *kernel_page = frame_new_page (table_entry);
+  frame_table_entry_t *frame_entry = frame_new_page (table_entry);
   /* Failed to get a new page */
-  if (!kernel_page)
+  if (!frame_entry)
     {
       free (table_entry);
       return false;
     }
+  void *kernel_page = frame_entry->frame;
   bool success
       = install_page (table_entry->addr, kernel_page, true)
         && !hash_insert (&cur->sup_page_table, &table_entry->hash_elem);
@@ -149,12 +150,10 @@ bool
 load_from_swap (void *addr, sup_page_table_entry_t *table_entry)
 {
   /* get a frame by eviction */
-  frame_table_entry_t *frame = evict_one_frame ();
+  frame_table_entry_t *frame = frame_new_page (table_entry);
   /* load data in swap space back to this frame */
   read_frame_from_block (frame, table_entry->swap_idx);
   /* set new owner and sup_table_entry of the frame */
-  frame->owner = thread_tid ();
-  frame->sup_table_entry = table_entry;
   table_entry->swap_idx = NOT_IN_SWAP;
   table_entry->access_time = timer_ticks ();
   bool success = install_page (table_entry->addr, frame->frame, true);
@@ -169,7 +168,7 @@ load_from_swap (void *addr, sup_page_table_entry_t *table_entry)
 }
 
 bool
-lazy_load (struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes,
+lazy_load (struct file *file, int32_t ofs, uint8_t *upage, uint32_t read_bytes,
            uint32_t zero_bytes, bool writable)
 {
   int32_t offset = ofs;
@@ -212,10 +211,10 @@ lazy_load (struct file *file, off_t ofs, uint8_t *upage, uint32_t read_bytes,
 bool
 load_from_file (void *addr, sup_page_table_entry_t *table_entry)
 {
-  void *kernel_page = frame_new_page (table_entry);
-  if (!kernel_page)
+  frame_table_entry_t *frame_entry = frame_new_page (table_entry);
+  if (!frame_entry)
     return false;
-
+  void *kernel_page = frame_entry->frame;
   lock_acquire (&filesys_lock);
   file_seek (table_entry->file, table_entry->ofs);
   if (file_read (table_entry->file, kernel_page, table_entry->read_bytes)

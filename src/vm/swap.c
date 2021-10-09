@@ -30,14 +30,15 @@ swap_destroy ()
 void
 swap_release (int sector_idx)
 {
+  lock_acquire (&swap_table_lock);
   bitmap_set_multiple (swap_table, sector_idx, 8, false);
+  lock_release (&swap_table_lock);
 }
 
 /* read a frame to FRAME from block at SECTOR_IDX */
 void
 read_frame_from_block (frame_table_entry_t *frame, int sector_idx)
 {
-  lock_acquire (&swap_table_lock);
   /* sector size is 512B and frame size is 4kB */
   for (int i = 0; i < 8; ++i)
     {
@@ -47,14 +48,12 @@ read_frame_from_block (frame_table_entry_t *frame, int sector_idx)
     }
   /* mark those 8 sectors as unused */
   swap_release (sector_idx);
-  lock_release (&swap_table_lock);
 }
 
 /* wrtie data in FRAME to en empyt slot */
 void
 write_frame_to_block (frame_table_entry_t *frame)
 {
-  // lock_acquire (&swap_table_lock);
   int sector_idx = get_new_swap_slot ();
   frame->sup_table_entry->swap_idx = sector_idx;
   for (int i = 0; i < 8; ++i)
@@ -63,15 +62,16 @@ write_frame_to_block (frame_table_entry_t *frame)
       block_write (global_swap_block, sector_idx + i,
                    frame->frame + (i * BLOCK_SECTOR_SIZE));
     }
-  // lock_release (&swap_table_lock);
 }
 
 /* get a free swap slots */
 int
 get_new_swap_slot ()
 {
+  lock_acquire (&swap_table_lock);
   size_t sector = bitmap_scan_and_flip (swap_table, 0, 8, false);
   if (sector == BITMAP_ERROR)
     syscall_exit (-1);
+  lock_release (&swap_table_lock);
   return sector;
 }

@@ -4,6 +4,7 @@
 #include "threads/palloc.h"
 #include "threads/malloc.h"
 #include "threads/synch.h"
+#include "threads/vaddr.h"
 
 /* Frame table list, store frame table entries */
 static struct list frame_table;
@@ -61,35 +62,36 @@ frame_table_init ()
 }
 
 /* Get a new page and maintain info in frame table */
-void *
+frame_table_entry_t *
 frame_new_page (sup_page_table_entry_t *table_entry)
 {
   /* Invalid */
   if (!table_entry)
     return NULL;
   void *kernal_page = palloc_get_page (PAL_USER);
-  frame_table_entry_t *frame;
+  frame_table_entry_t *frame_entry;
   if (!kernal_page)
     {
       /* evict one frame and reuse this frame table entry */
-      frame = evict_one_frame ();
+      frame_entry = evict_one_frame ();
       /* set tid and sup table entry */
-      frame->owner = thread_tid ();
-      frame->sup_table_entry = table_entry;
-      return frame->frame;
+      frame_entry->owner = thread_tid ();
+      frame_entry->sup_table_entry = table_entry;
+      return frame_entry;
     }
   /* Create a new frame table entry */
-  frame = new_frame_table_entry (kernal_page, thread_tid (), table_entry);
+  frame_entry
+      = new_frame_table_entry (kernal_page, thread_tid (), table_entry);
   /* New frame table entry failed */
-  if (!frame)
+  if (!frame_entry)
     {
       /* Avoid memory leak */
       palloc_free_page (kernal_page);
       return NULL;
     }
   /* Add to frame table */
-  list_push_back (&frame_table, &frame->elem);
-  return kernal_page;
+  list_push_back (&frame_table, &frame_entry->elem);
+  return frame_entry;
 }
 
 /* Action func used in frame free page */
@@ -122,6 +124,7 @@ evict_one_frame ()
   frame_table_entry_t *frame
       = list_entry (min_elem, frame_table_entry_t, elem);
   struct thread *cur = thread_current ();
+  frame->sup_table_entry->from_file = false;
   pagedir_clear_page (cur->pagedir, frame->sup_table_entry->addr);
   write_frame_to_block (frame);
   return frame;
@@ -133,6 +136,14 @@ frame_access_time_less (const struct list_elem *a, const struct list_elem *b,
 {
   frame_table_entry_t *frame_a = list_entry (a, frame_table_entry_t, elem);
   frame_table_entry_t *frame_b = list_entry (b, frame_table_entry_t, elem);
-  return frame_a->sup_table_entry->access_time
-         < frame_b->sup_table_entry->access_time;
+  sup_page_table_entry_t *page_a = frame_a->sup_table_entry;
+  sup_page_table_entry_t *page_b = frame_b->sup_table_entry;
+  bool less_than = page_a->access_time < page_b->access_time;
+  if (page_a->writable != page_b->writable)
+    {
+      return page_a->writable;
+    }
+  if (is_kernel_vaddr (page_a->addr) != is_kernel_vaddr (page_b->addr))
+    return !is_kernel_vaddr (page_a->addr);
+  return less_than;
 }
