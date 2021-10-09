@@ -377,9 +377,13 @@ void
 syscall_close (int fd)
 {
   struct list_file *f = get_file (fd);
-  lock_acquire (&filesys_lock);
+  struct thread *cur = thread_current ();
+  bool need_lock = filesys_lock.holder != cur;
+  if (need_lock)
+    lock_acquire (&filesys_lock);
   file_close (f->file);
-  lock_release (&filesys_lock);
+  if (need_lock)
+    lock_release (&filesys_lock);
   list_remove (&f->elem);
   free (f);
 }
