@@ -12,6 +12,8 @@
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "vm/page.h"
+#include "vm/frame.h"
 
 struct lock filesys_lock;
 
@@ -154,7 +156,7 @@ check_valid_ptr (const void *ptr)
     }
   if (!pagedir_get_page (thread_current ()->pagedir, ptr))
     {
-      if (!try_get_page (ptr, checker_esp))
+      if (!try_get_page ((void *)ptr, checker_esp))
         {
           syscall_exit (-1);
         }
@@ -388,26 +390,74 @@ syscall_close (int fd)
   free (f);
 }
 
-static bool
-mmap_check_input (int fd, void *addr)
+static mmap_entry_t *
+new_mmap_entry (void *addr, struct file *file, int page_count)
 {
-  /* Not console and multiples of page size */
-  return fd >= 2 && (uint32_t)addr % PGSIZE == 0;
+  mmap_entry_t *entry = (mmap_entry_t *)malloc (sizeof (mmap_entry_t));
+  if (!entry)
+    return NULL;
+  entry->id = thread_current ()->mmap_id++;
+  entry->addr = addr;
+  entry->file = file;
+  entry->page_count = page_count;
+  return entry;
+}
+
+static void
+do_free_mmap_entry (mmap_entry_t *entry)
+{
+  struct thread *cur = thread_current ();
+  void *addr = entry->addr;
+  for (int cur_page = 0; cur_page < entry->page_count; ++cur_page)
+    {
+      sup_page_table_entry_t *table_entry
+          = sup_table_find (&cur->sup_page_table, addr);
+      if (table_entry)
+        {
+          /* If dirty: write back */
+          if (pagedir_is_dirty (cur->pagedir, addr))
+            {
+              lock_acquire (&filesys_lock);
+              file_seek (table_entry->file, table_entry->ofs);
+              file_write (table_entry->file, addr, table_entry->read_bytes);
+              lock_release (&filesys_lock);
+            }
+          if (pagedir_get_page (cur->pagedir, table_entry->addr))
+            {
+              frame_free_page (
+                  pagedir_get_page (cur->pagedir, table_entry->addr));
+              pagedir_clear_page (cur->pagedir, table_entry->addr);
+            }
+          hash_delete (&cur->sup_page_table, &table_entry->hash_elem);
+        }
+      addr += PGSIZE;
+    }
+
+  lock_acquire (&filesys_lock);
+  file_close (entry->file);
+  lock_release (&filesys_lock);
+  free (entry);
 }
 
 static bool
-mmap_reopen_file (int fd, struct file **f_ptr)
+check_mmap_overlaps (void *addr, int size)
 {
-  struct list_file *f = get_file (fd);
-  off_t file_size = file_length (f->file);
-  // TODO:
-  return false;
+  if (!addr || size < 0)
+    return false;
+  struct thread *cur = thread_current ();
+  for (; size >= 0; size -= PGSIZE)
+    {
+      if (sup_table_find (&cur->sup_page_table, addr)
+          || pagedir_get_page (cur->pagedir, addr))
+        return false;
+      addr += PGSIZE;
+    }
+  return true;
 }
 
 mapid_t
 syscall_mmap (int fd, void *addr)
 {
-  check_valid_ptr (addr);
   /* Console or not multiples of page size */
   if (fd < 2 || (uint32_t)addr % PGSIZE)
     return -1;
@@ -416,15 +466,43 @@ syscall_mmap (int fd, void *addr)
   /* No file or has a length of zero bytes */
   if (!f_entry->file || !(file_size = file_length (f_entry->file)))
     return -1;
-  struct file *f = NULL; /*do_file_reopen (f_entry->file);*/
+  lock_acquire (&filesys_lock);
+  struct file *f = file_reopen (f_entry->file);
+  lock_release (&filesys_lock);
   /* Failed to reopen */
   if (!f)
     return -1;
-  // TODO:
+  /* Check if addr has overlaps */
+  if (!check_mmap_overlaps (addr, file_size))
+    {
+      return -1;
+    }
+  uint32_t read_bytes = file_size;
+  uint32_t zero_bytes = (PGSIZE - read_bytes % PGSIZE) % PGSIZE;
+  int page_count = (read_bytes + zero_bytes) / PGSIZE;
+  mmap_entry_t *mmap_entry = new_mmap_entry (addr, f, page_count);
+  if (!lazy_load (f, 0, addr, read_bytes, zero_bytes, true, true))
+    {
+      free (mmap_entry);
+      return -1;
+    }
+  list_push_back (&thread_current ()->mmap_list, &mmap_entry->elem);
+  return mmap_entry->id;
 }
 
 void
 syscall_munmap (mapid_t mapping)
 {
-  // TODO:
+  struct thread *cur = thread_current ();
+  for (struct list_elem *e = list_begin (&cur->mmap_list);
+       e != list_end (&cur->mmap_list); e = list_next (e))
+    {
+      mmap_entry_t *entry = list_entry (e, mmap_entry_t, elem);
+      if (entry->id == mapping)
+        {
+          list_remove (e);
+          do_free_mmap_entry (entry);
+          return;
+        }
+    }
 }

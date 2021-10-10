@@ -5,6 +5,9 @@
 #include "threads/malloc.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "filesys/file.h"
+
+extern struct lock filesys_lock;
 
 /* Frame table list, store frame table entries */
 static struct list frame_table;
@@ -72,11 +75,13 @@ frame_new_page (sup_page_table_entry_t *table_entry)
   frame_table_entry_t *frame_entry;
   if (!kernal_page)
     {
+      lock_acquire (&table_entry->lock);
       /* evict one frame and reuse this frame table entry */
       frame_entry = evict_one_frame ();
       /* set tid and sup table entry */
       frame_entry->owner = thread_tid ();
       frame_entry->sup_table_entry = table_entry;
+      lock_release (&table_entry->lock);
       return frame_entry;
     }
   /* Create a new frame table entry */
@@ -90,13 +95,15 @@ frame_new_page (sup_page_table_entry_t *table_entry)
       return NULL;
     }
   /* Add to frame table */
+  lock_acquire (&frame_table_lock);
   list_push_back (&frame_table, &frame_entry->elem);
+  lock_release (&frame_table_lock);
   return frame_entry;
 }
 
 /* Action func used in frame free page */
 static bool
-do_frame_entry_frame (frame_table_entry_t *entry)
+do_frame_entry_free (frame_table_entry_t *entry)
 {
   list_remove (&entry->elem);
   palloc_free_page (entry->frame);
@@ -112,7 +119,7 @@ frame_free_page (void *page)
   if (!page)
     return;
   frame_table_foreach_if (frame_table_entry_equal_page, page,
-                          do_frame_entry_frame);
+                          do_frame_entry_free);
 }
 
 frame_table_entry_t *
@@ -123,10 +130,25 @@ evict_one_frame ()
       = list_min (&frame_table, frame_access_time_less, NULL);
   frame_table_entry_t *frame
       = list_entry (min_elem, frame_table_entry_t, elem);
+  lock_acquire (&frame_table_lock);
   struct thread *cur = thread_current ();
-  frame->sup_table_entry->from_file = false;
-  pagedir_clear_page (cur->pagedir, frame->sup_table_entry->addr);
-  write_frame_to_block (frame);
+  if (frame->sup_table_entry->from_file && frame->sup_table_entry->is_mmap
+      && pagedir_is_dirty (cur->pagedir, frame->sup_table_entry->addr))
+    {
+      lock_acquire (&filesys_lock);
+      file_seek (frame->sup_table_entry->file, frame->sup_table_entry->ofs);
+      file_write (frame->sup_table_entry->file, frame->sup_table_entry->addr,
+                  frame->sup_table_entry->read_bytes);
+      lock_release (&filesys_lock);
+    }
+  else
+    {
+      frame->sup_table_entry->from_file = false;
+      write_frame_to_block (frame);
+    }
+  pagedir_clear_page (get_thread (frame->owner)->pagedir,
+                      frame->sup_table_entry->addr);
+  lock_release (&frame_table_lock);
   return frame;
 }
 

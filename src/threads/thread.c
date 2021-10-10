@@ -188,6 +188,8 @@ thread_create (const char *name, int priority, thread_func *function,
       if (!t->process)
         return TID_ERROR;
       t->parent = thread_current ();
+      t->mmap_id = 0;
+      list_init (&t->mmap_list);
     }
   // !END MODIFY
 

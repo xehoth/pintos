@@ -5,6 +5,7 @@
 #include "threads/palloc.h"
 #include "threads/vaddr.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 #include "devices/timer.h"
 #include "filesys/file.h"
 #include "userprog/syscall.h"
@@ -30,6 +31,8 @@ new_sup_table_entry (void *addr, uint64_t access_time)
   entry->read_bytes = 0;
   entry->zero_bytes = 0;
   entry->writable = false;
+  entry->is_mmap = false;
+  lock_init (&entry->lock);
   return entry;
 }
 
@@ -80,7 +83,7 @@ page_less_func (const struct hash_elem *a, const struct hash_elem *b,
   return (uint32_t)entry_a->addr < (uint32_t)entry_b->addr;
 }
 
-static sup_page_table_entry_t *
+sup_page_table_entry_t *
 sup_table_find (sup_page_table_t *table, void *page)
 {
   /* Invalid */
@@ -104,7 +107,7 @@ try_get_page (void *fault_addr, void *esp)
   /* If not: need to grow */
   if (!table_entry)
     {
-      if ((uint32_t)fault_addr < esp - 32)
+      if ((uint32_t)fault_addr < (uint32_t)esp - 32)
         return false;
       return grow_stack (fault_addr);
     }
@@ -151,25 +154,29 @@ load_from_swap (void *addr, sup_page_table_entry_t *table_entry)
 {
   /* get a frame by eviction */
   frame_table_entry_t *frame = frame_new_page (table_entry);
+  lock_acquire (&table_entry->lock);
   /* load data in swap space back to this frame */
   read_frame_from_block (frame, table_entry->swap_idx);
   /* set new owner and sup_table_entry of the frame */
   table_entry->swap_idx = NOT_IN_SWAP;
   table_entry->access_time = timer_ticks ();
-  bool success = install_page (table_entry->addr, frame->frame, true);
+  bool success
+      = install_page (table_entry->addr, frame->frame, table_entry->writable);
   if (!success)
     {
       frame_free_page (frame->frame);
       hash_delete (&thread_current ()->sup_page_table,
                    &table_entry->hash_elem);
+      lock_release (&table_entry->lock);
       return false;
     }
+  lock_release (&table_entry->lock);
   return true;
 }
 
 bool
 lazy_load (struct file *file, int32_t ofs, uint8_t *upage, uint32_t read_bytes,
-           uint32_t zero_bytes, bool writable)
+           uint32_t zero_bytes, bool writable, bool is_mmap)
 {
   int32_t offset = ofs;
   while (read_bytes > 0 || zero_bytes > 0)
@@ -191,6 +198,7 @@ lazy_load (struct file *file, int32_t ofs, uint8_t *upage, uint32_t read_bytes,
       sup_entry->zero_bytes = page_zero_bytes;
       sup_entry->writable = writable;
       sup_entry->ofs = offset;
+      sup_entry->is_mmap = is_mmap;
 
       struct thread *cur = thread_current ();
       if (hash_insert (&cur->sup_page_table, &sup_entry->hash_elem))
@@ -214,6 +222,7 @@ load_from_file (void *addr, sup_page_table_entry_t *table_entry)
   frame_table_entry_t *frame_entry = frame_new_page (table_entry);
   if (!frame_entry)
     return false;
+  lock_acquire (&table_entry->lock);
   void *kernel_page = frame_entry->frame;
   lock_acquire (&filesys_lock);
   file_seek (table_entry->file, table_entry->ofs);
@@ -221,6 +230,7 @@ load_from_file (void *addr, sup_page_table_entry_t *table_entry)
       != (int)table_entry->read_bytes)
     {
       frame_free_page (kernel_page);
+      lock_release (&table_entry->lock);
       return false;
     }
   lock_release (&filesys_lock);
@@ -229,7 +239,9 @@ load_from_file (void *addr, sup_page_table_entry_t *table_entry)
   if (!install_page (table_entry->addr, kernel_page, table_entry->writable))
     {
       frame_free_page (kernel_page);
+      lock_release (&table_entry->lock);
       return false;
     }
+  lock_release (&table_entry->lock);
   return true;
 }

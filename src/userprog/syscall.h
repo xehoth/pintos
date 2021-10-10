@@ -1,6 +1,18 @@
 #ifndef USERPROG_SYSCALL_H
 #define USERPROG_SYSCALL_H
 #include <stdbool.h>
+#include <list.h>
+
+typedef int mapid_t;
+
+typedef struct mmap_entry
+{
+  mapid_t id;
+  void *addr; /* User virtual addr */
+  struct file *file;
+  int page_count; /* Number of pages */
+  struct list_elem elem;
+} mmap_entry_t;
 
 void syscall_init (void);
 
@@ -18,7 +30,6 @@ void syscall_seek (int fd, unsigned position);
 unsigned syscall_tell (int fd);
 void syscall_close (int fd);
 
-typedef int mapid_t;
 mapid_t syscall_mmap (int fd, void *addr);
 void syscall_munmap (mapid_t mapping);
 #endif /* userprog/syscall.h */

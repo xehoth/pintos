@@ -8,6 +8,7 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -40,6 +41,7 @@ static void parse_args (esp_t *esp, char *args_str, char *save_ptr);
 static bool deny_write_to_self (struct thread *cur, const char *name);
 static void recover_write_to_self (struct thread *cur);
 static void process_remove_all_frames (tid_t tid);
+static void process_free_mmap_list (struct thread *cur);
 // !!!END MODIFY
 
 static thread_func start_process NO_RETURN;
@@ -185,6 +187,15 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  // !BEGIN MODIFY
+  if (cur->process->status != PROCESS_ERROR)
+    cur->process->status = PROCESS_EXITED;
+  recover_write_to_self (cur);
+
+  process_free_mmap_list (cur);
+  sup_table_free (&cur->sup_page_table);
+  process_remove_all_frames (cur->tid);
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -204,14 +215,6 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  // !BEGIN MODIFY
-  if (cur->process->status != PROCESS_ERROR)
-    cur->process->status = PROCESS_EXITED;
-  recover_write_to_self (cur);
-
-  sup_table_free (&cur->sup_page_table);
-  process_remove_all_frames (cur->tid);
-
   sema_up (&cur->process->wait_sema);
   // !END MODIFY
 }
@@ -481,7 +484,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
-  return lazy_load (file, ofs, upage, read_bytes, zero_bytes, writable);
+  return lazy_load (file, ofs, upage, read_bytes, zero_bytes, writable, false);
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
@@ -664,5 +667,16 @@ process_remove_all_frames (tid_t pid)
 {
   frame_table_foreach_if (frame_table_entry_equal_pid, &pid,
                           do_free_frame_table_entry);
+}
+
+static void
+process_free_mmap_list (struct thread *cur)
+{
+  while (!list_empty (&cur->mmap_list))
+    {
+      mmap_entry_t *entry
+          = list_entry (list_begin (&cur->mmap_list), mmap_entry_t, elem);
+      syscall_munmap (entry->id);
+    }
 }
 // !END MODIFY

@@ -113,6 +113,8 @@ struct thread
 
 #ifdef VM
   sup_page_table_t sup_page_table; /* The supplementary page table */
+  struct list mmap_list;
+  int mmap_id;
 #endif
 
   int64_t ticks_to_unblock; /* The time to unblock the sleeping thread */
