@@ -87,26 +87,20 @@ timer_elapsed (int64_t then)
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
-timer_sleep (int64_t ticks)
+timer_sleep (int64_t ticks) 
 {
-  // !BEGIN MODIFY
   /* No need to sleep */
-  if (ticks <= 0)
-    return;
+  if (ticks <= 0) return;
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-
   /* Ensure the process below won't be interrupt */
   enum intr_level old_level = intr_disable ();
-
   /* Record the time to unblock */
   thread_current ()->ticks_to_unblock = start + ticks;
   /* Block the current thread */
   thread_block ();
-  /* Ensure the process above won't be interrupt */
   intr_set_level (old_level);
-  // !END MODIFY
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -184,10 +178,8 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  // !BEGIN MODIFY
-  /* Check whether the sleeping thread need to unblock */
+  /* Check whether a thread should wake up, same as proj1 */
   thread_foreach (thread_unblock_check, (void *)&ticks);
-  // !END MODIFY
   thread_tick ();
 }
 
