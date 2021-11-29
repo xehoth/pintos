@@ -9,34 +9,8 @@
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
-/* Number of direct blocks */
-#define N_DIRECT_BLOCKS (128 - 3 - 2)
-#define N_INDIRECT_BLOCKS 128
 
 static char zeros[BLOCK_SECTOR_SIZE];
-
-const int N_LEVEL0 = N_DIRECT_BLOCKS;
-const int N_LEVEL1 = N_LEVEL0 + N_INDIRECT_BLOCKS;
-const int N_LEVEL2 = N_LEVEL1 + N_INDIRECT_BLOCKS * N_INDIRECT_BLOCKS;
-
-/* On-disk inode.
-   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
-struct inode_disk
-{
-  union
-  {
-    block_sector_t blocks[N_DIRECT_BLOCKS + 2];
-    struct
-    {
-      block_sector_t direct_blocks[N_DIRECT_BLOCKS]; /* Direct block sectors */
-      block_sector_t indirect_block;
-      block_sector_t doubly_indirect_block;
-    };
-  };
-  off_t length;   /* File size in bytes. */
-  bool is_dir;    /* Is directory */
-  unsigned magic; /* Magic number. */
-};
 
 struct indirect_inode_disk
 {
@@ -60,17 +34,6 @@ bytes_to_sectors (off_t size)
 {
   return DIV_ROUND_UP (size, BLOCK_SECTOR_SIZE);
 }
-
-/* In-memory inode. */
-struct inode
-{
-  struct list_elem elem;  /* Element in inode list. */
-  block_sector_t sector;  /* Sector number of disk location. */
-  int open_cnt;           /* Number of openers. */
-  bool removed;           /* True if deleted, false otherwise. */
-  int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
-  struct inode_disk data; /* Inode content. */
-};
 
 static block_sector_t
 index_to_sector (const struct inode_disk *node_disk, off_t index)
@@ -133,7 +96,7 @@ inode_init (void)
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool
-inode_create (block_sector_t sector, off_t length)
+inode_create (block_sector_t sector, off_t length, bool is_dir)
 {
   struct inode_disk *disk_inode = NULL;
   bool success = false;
@@ -150,7 +113,7 @@ inode_create (block_sector_t sector, off_t length)
       size_t sectors = bytes_to_sectors (length);
       disk_inode->length = length;
       disk_inode->magic = INODE_MAGIC;
-      disk_inode->is_dir = false;
+      disk_inode->is_dir = is_dir;
       if (do_inode_create (disk_inode, sectors))
         {
           block_write (fs_device, sector, disk_inode);

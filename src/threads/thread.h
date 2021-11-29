@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "filesys/file.h"
+#include "filesys/directory.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -109,7 +110,7 @@ struct thread
   struct list open_files;  /* List of opened files under current thread */
   int fd;                  /* Counter to set correct file descriptor */
 #endif
-
+  struct dir *cwd; /* Current working dir */
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
 };

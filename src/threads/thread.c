@@ -474,6 +474,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *)t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  /* Init to NULL <=> ROOT */
+  t->cwd = NULL;
 
   /* Initialize process infos that are maintained in thread */
   process_thread_init (t);

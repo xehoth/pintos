@@ -11,6 +11,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "filesys/file.h"
 
 /* Lock to protect file system */
@@ -30,6 +31,7 @@ struct file_list_elem
 {
   int fd; /* File descriptor */
   struct file *file;
+  struct dir *dir;
   struct list_elem elem;
 };
 
@@ -140,6 +142,41 @@ syscall_handler (struct intr_frame *f)
         /* Close contains 1 argument */
         get_args (f, args, 1);
         syscall_close (*(int *)args[0]);
+        break;
+      }
+    case SYS_CHDIR:
+      {
+        /* Chdir contains 1 argument */
+        get_args (f, args, 1);
+        f->eax = syscall_chdir (*(const char **)args[0]);
+        break;
+      }
+    case SYS_MKDIR:
+      {
+        /* Mkdir contains 1 argument */
+        get_args (f, args, 1);
+        f->eax = syscall_mkdir (*(const char **)args[0]);
+        break;
+      }
+    case SYS_READDIR:
+      {
+        /* Readdir contains 2 arguments */
+        get_args (f, args, 2);
+        f->eax = syscall_readdir (*(int *)args[0], *(char **)args[1]);
+        break;
+      }
+    case SYS_ISDIR:
+      {
+        /* Isdir contains 1 argument */
+        get_args (f, args, 1);
+        f->eax = syscall_isdir (*(int *)args[0]);
+        break;
+      }
+    case SYS_INUMBER:
+      {
+        /* Inumber contains 1 argument */
+        get_args (f, args, 1);
+        f->eax = syscall_inumber (*(int *)args[0]);
         break;
       }
     default:
@@ -267,7 +304,7 @@ syscall_wait (pid_t pid)
   return process_wait (pid);
 }
 
-struct file_list_elem *
+static struct file_list_elem *
 get_file (int fd)
 {
   struct list *open_file_list = &thread_current ()->open_files;
@@ -292,7 +329,7 @@ syscall_create (const char *file, unsigned initial_size)
   /* Use lock to protect filesystem */
   lock_acquire (&filesys_lock);
   /* Invoke func provided in filesys */
-  bool success = filesys_create (file, initial_size);
+  bool success = filesys_create (file, initial_size, false);
   lock_release (&filesys_lock);
   return success;
 }
@@ -329,6 +366,11 @@ syscall_open (const char *file)
   /* Initialize open file list entry */
   open_file->fd = cur->fd++;
   open_file->file = f;
+  open_file->dir = NULL;
+  lock_acquire (&filesys_lock);
+  if (file_get_inode (f)->data.is_dir)
+    open_file->dir = dir_open (file_get_inode (open_file->file));
+  lock_release (&filesys_lock);
   /* Add this file to the open file list of current thread */
   list_push_back (&cur->open_files, &open_file->elem);
   return open_file->fd;
@@ -377,7 +419,9 @@ syscall_write (int fd, const void *buffer, unsigned size)
   /* Cannot write to std in */
   if (fd == STDIN_FILENO)
     syscall_exit (-1);
-
+  /* Write into a dir */
+  if (syscall_isdir (fd))
+    syscall_exit (-1);
   struct file_list_elem *f = get_file (fd);
   /* Use lock to protect filesystem */
   lock_acquire (&filesys_lock);
@@ -415,8 +459,69 @@ syscall_close (int fd)
   /* Use lock to protect filesystem */
   lock_acquire (&filesys_lock);
   file_close (f->file);
+  if (f->dir)
+    {
+      free (f->dir);
+      f->dir = NULL;
+    }
   lock_release (&filesys_lock);
   list_remove (&f->elem);
   /* Free to ensure no memory leak */
   free (f);
+}
+
+bool
+syscall_chdir (const char *dir)
+{
+  check_valid_str (dir);
+  lock_acquire (&filesys_lock);
+  bool ret = filesys_chdir (dir);
+  lock_release (&filesys_lock);
+  return ret;
+}
+
+bool
+syscall_mkdir (const char *dir)
+{
+  check_valid_str (dir);
+  lock_acquire (&filesys_lock);
+  bool ret = filesys_create (dir, 0, true);
+  lock_release (&filesys_lock);
+  return ret;
+}
+
+bool
+syscall_readdir (int fd, char *name)
+{
+  check_valid_str (name);
+  struct file_list_elem *f = get_file (fd);
+  /* Use lock to protect filesystem */
+  lock_acquire (&filesys_lock);
+  struct dir *dir = f->dir;
+  bool ret = dir && dir_readdir (dir, name);
+  lock_release (&filesys_lock);
+  return ret;
+}
+
+bool
+syscall_isdir (int fd)
+{
+  struct file_list_elem *f = get_file (fd);
+  /* Use lock to protect filesystem */
+  lock_acquire (&filesys_lock);
+  struct inode *inode = file_get_inode (f->file);
+  bool ret = inode && inode->data.is_dir;
+  lock_release (&filesys_lock);
+  return ret;
+}
+
+int
+syscall_inumber (int fd)
+{
+  struct file_list_elem *f = get_file (fd);
+  /* Use lock to protect filesystem */
+  lock_acquire (&filesys_lock);
+  int ret = inode_get_inumber (file_get_inode (f->file));
+  lock_release (&filesys_lock);
+  return ret;
 }
