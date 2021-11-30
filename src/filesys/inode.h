@@ -10,9 +10,9 @@
 #define N_DIRECT_BLOCKS (128 - 3 - 2)
 #define N_INDIRECT_BLOCKS 128
 
-static const int N_LEVEL0 = N_DIRECT_BLOCKS;
-static const int N_LEVEL1 = N_LEVEL0 + N_INDIRECT_BLOCKS;
-static const int N_LEVEL2 = N_LEVEL1 + N_INDIRECT_BLOCKS * N_INDIRECT_BLOCKS;
+#define N_LEVEL0 N_DIRECT_BLOCKS
+#define N_LEVEL1 (N_LEVEL0 + N_INDIRECT_BLOCKS)
+#define N_LEVEL2 (N_LEVEL1 + N_INDIRECT_BLOCKS * N_INDIRECT_BLOCKS)
 
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
