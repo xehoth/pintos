@@ -6,6 +6,7 @@
 #include "filesys/filesys.h"
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
+#include "filesys/cache.h"
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
@@ -17,11 +18,25 @@ struct indirect_inode_disk
   block_sector_t blocks[N_INDIRECT_BLOCKS];
 };
 
+/* Wrap block_read, then replace with bvffer_cache_read */
+static void
+read_wrapper (block_sector_t sector, void *buffer)
+{
+  block_read (fs_device, sector, buffer);
+}
+
+/* Wrap block_write, then replace with bvffer_cache_write */
+static void
+write_wrapper (block_sector_t sector, const void *buffer)
+{
+  block_write (fs_device, sector, buffer);
+}
+
 static void
 load_indirect_inode_disk (struct indirect_inode_disk *node,
                           block_sector_t sector)
 {
-  block_read (fs_device, sector, node);
+  read_wrapper (sector, node);
 }
 
 static bool do_inode_create (struct inode_disk *node_disk, size_t sectors);
@@ -116,7 +131,7 @@ inode_create (block_sector_t sector, off_t length, bool is_dir)
       disk_inode->is_dir = is_dir;
       if (do_inode_create (disk_inode, sectors))
         {
-          block_write (fs_device, sector, disk_inode);
+          write_wrapper (sector, disk_inode);
           success = true;
         }
       free (disk_inode);
@@ -156,7 +171,7 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
-  block_read (fs_device, inode->sector, &inode->data);
+  read_wrapper (inode->sector, &inode->data);
   return inode;
 }
 
@@ -245,7 +260,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
         {
           /* Read full sector directly into caller's buffer. */
-          block_read (fs_device, sector_idx, buffer + bytes_read);
+          read_wrapper (sector_idx, buffer + bytes_read);
         }
       else
         {
@@ -257,7 +272,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
               if (bounce == NULL)
                 break;
             }
-          block_read (fs_device, sector_idx, bounce);
+          read_wrapper (sector_idx, bounce);
           memcpy (buffer + bytes_read, bounce + sector_ofs, chunk_size);
         }
 
@@ -294,7 +309,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       if (!do_inode_create (&inode->data, sectors))
         return 0;
       inode->data.length = offset + size;
-      block_write (fs_device, inode->sector, &inode->data);
+      write_wrapper (inode->sector, &inode->data);
     }
 
   while (size > 0)
@@ -316,7 +331,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
         {
           /* Write full sector directly to disk. */
-          block_write (fs_device, sector_idx, buffer + bytes_written);
+          write_wrapper (sector_idx, buffer + bytes_written);
         }
       else
         {
@@ -332,11 +347,11 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
              we're writing, then we need to read in the sector
              first.  Otherwise we start with a sector of all zeros. */
           if (sector_ofs > 0 || chunk_size < sector_left)
-            block_read (fs_device, sector_idx, bounce);
+            read_wrapper (sector_idx, bounce);
           else
             memset (bounce, 0, BLOCK_SECTOR_SIZE);
           memcpy (bounce + sector_ofs, buffer + bytes_written, chunk_size);
-          block_write (fs_device, sector_idx, bounce);
+          write_wrapper (sector_idx, bounce);
         }
 
       /* Advance. */
@@ -384,10 +399,10 @@ do_inode_create_sector (block_sector_t *sector,
     {
       if (!free_map_allocate (1, sector))
         return false;
-      block_write (fs_device, *sector, zeros);
+      write_wrapper (*sector, zeros);
     }
   if (node)
-    block_read (fs_device, *sector, node);
+    read_wrapper (*sector, node);
   return true;
 }
 
@@ -428,9 +443,9 @@ do_inode_create (struct inode_disk *node_disk, size_t sectors)
             if (!do_inode_create_sector (&level0_nodes.blocks[l0_i], NULL))
               return false;
           sectors -= remain;
-          block_write (fs_device, level1_nodes.blocks[l1_i], &level0_nodes);
+          write_wrapper (level1_nodes.blocks[l1_i], &level0_nodes);
         }
-      block_write (fs_device, node_disk->doubly_indirect_block, &level1_nodes);
+      write_wrapper (node_disk->doubly_indirect_block, &level1_nodes);
     }
   else if (sectors > (size_t)N_LEVEL0)
     {
@@ -446,7 +461,7 @@ do_inode_create (struct inode_disk *node_disk, size_t sectors)
       for (size_t l0_i = 0; l0_i < sectors; ++l0_i)
         if (!do_inode_create_sector (&level0_nodes.blocks[l0_i], NULL))
           return false;
-      block_write (fs_device, node_disk->indirect_block, &level0_nodes);
+      write_wrapper (node_disk->indirect_block, &level0_nodes);
     }
   else
     {
