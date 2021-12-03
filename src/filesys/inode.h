@@ -7,11 +7,17 @@
 #include "list.h"
 
 /* Number of direct blocks */
+/* Total 128 * 4 bytes, 2 for indirect and doubly indirect block */
+/* 3 for length, is_dir and magic, because of alignment of struct */
+/* The rest are for direct blocks */
 #define N_DIRECT_BLOCKS (128 - 3 - 2)
+/* 512 bytes all used for indirect blocks => 128 */
 #define N_INDIRECT_BLOCKS 128
-
+/* Level 0 blocks */
 #define N_LEVEL0 N_DIRECT_BLOCKS
+/* <= Level 1 blocks */
 #define N_LEVEL1 (N_LEVEL0 + N_INDIRECT_BLOCKS)
+/* <= Level 2 blocks */
 #define N_LEVEL2 (N_LEVEL1 + N_INDIRECT_BLOCKS * N_INDIRECT_BLOCKS)
 
 /* On-disk inode.
@@ -20,12 +26,12 @@ struct inode_disk
 {
   union
   {
-    block_sector_t blocks[N_DIRECT_BLOCKS + 2];
+    block_sector_t blocks[N_DIRECT_BLOCKS + 2]; /* Total blocks */
     struct
     {
       block_sector_t direct_blocks[N_DIRECT_BLOCKS]; /* Direct block sectors */
-      block_sector_t indirect_block;
-      block_sector_t doubly_indirect_block;
+      block_sector_t indirect_block;                 /* Indirect block */
+      block_sector_t doubly_indirect_block; /* Doubly indirect block */
     };
   };
   off_t length;   /* File size in bytes. */

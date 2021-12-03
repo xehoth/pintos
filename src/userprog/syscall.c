@@ -31,7 +31,7 @@ struct file_list_elem
 {
   int fd; /* File descriptor */
   struct file *file;
-  struct dir *dir;
+  struct dir *dir; /* Need to record the opened dir, used for readdir */
   struct list_elem elem;
 };
 
@@ -368,6 +368,8 @@ syscall_open (const char *file)
   open_file->file = f;
   open_file->dir = NULL;
   lock_acquire (&filesys_lock);
+  /* If the opened file is a dir, then need to record it */
+  /* We need to use the dir in the readdir */
   if (file_get_inode (f)->data.is_dir)
     open_file->dir = dir_open (file_get_inode (open_file->file));
   lock_release (&filesys_lock);
@@ -461,6 +463,13 @@ syscall_close (int fd)
   file_close (f->file);
   if (f->dir)
     {
+      /* Note here we just need to free the dir */
+      /* Because the corresponding inode of the dir and file are the same */
+      /* The inode is closed by file_close */
+      /* We should not close the inode again */
+      /* So, we cannot call dir_close */
+      /* We just need to free the dir */
+      /* to avoid memory leak */
       free (f->dir);
       f->dir = NULL;
     }
@@ -485,6 +494,7 @@ syscall_mkdir (const char *dir)
 {
   check_valid_str (dir);
   lock_acquire (&filesys_lock);
+  /* Initially the size of the directory is 0 */
   bool ret = filesys_create (dir, 0, true);
   lock_release (&filesys_lock);
   return ret;
@@ -497,6 +507,7 @@ syscall_readdir (int fd, char *name)
   struct file_list_elem *f = get_file (fd);
   /* Use lock to protect filesystem */
   lock_acquire (&filesys_lock);
+  /* Used the recorded dir */
   struct dir *dir = f->dir;
   bool ret = dir && dir_readdir (dir, name);
   lock_release (&filesys_lock);
@@ -510,6 +521,7 @@ syscall_isdir (int fd)
   /* Use lock to protect filesystem */
   lock_acquire (&filesys_lock);
   struct inode *inode = file_get_inode (f->file);
+  /* Check whether it is a dir */
   bool ret = inode && inode->data.is_dir;
   lock_release (&filesys_lock);
   return ret;

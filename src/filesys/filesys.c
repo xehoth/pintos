@@ -42,8 +42,7 @@ filesys_done (void)
   buffer_cache_close ();
 }
 
-/* Open a dir with path (exclude the last token), save the last into file_name
- */
+/* Open dir with path (exclude the last token), save the last into file_name */
 static struct dir *
 dir_open_with_path (const char *name, char const **file_name)
 {
@@ -56,30 +55,40 @@ dir_open_with_path (const char *name, char const **file_name)
     {
       /* Absolute path */
       dir = dir_open_root ();
+      /* Skip all leading / */
+      /* Process cases like '///////...' */
       while (*name && *name == '/')
         ++name;
     }
   else
     {
+      /* Relative path */
       struct thread *cur = thread_current ();
+      /* Open the current working directory */
       dir = !cur->cwd ? dir_open_root () : dir_reopen (cur->cwd);
     }
-
+  /* Invalid, the starting directory is NULL */
   if (!dir)
     return NULL;
 
+  /* Loop through the path splited by '/' */
   for (const char *next_token = name;; name = next_token)
     {
+      /* Split the path by '/' */
       while (*next_token && *next_token != '/')
         ++next_token;
+      /* Reach the end, this is the last token */
       if (*next_token == '\0')
         {
+          /* Then save the last token into file_name */
           *file_name = name;
           break;
         }
       /* Split current name */
+      /* By utilizing C99 standard, which allows variable-length array */
       char cur_name[next_token - name + 1];
       memcpy (cur_name, name, next_token - name);
+      /* Ensure this is a string by adding '\0' at the end */
       cur_name[next_token - name] = '\0';
 
       struct dir *next_dir = NULL;
@@ -87,17 +96,21 @@ dir_open_with_path (const char *name, char const **file_name)
       if (!dir_lookup (dir, cur_name, &inode)
           || !(next_dir = dir_open (inode)))
         {
+          /* Prevent memory leak */
           dir_close (dir);
           return NULL;
         }
+      /* Close the current dir and move to the next */
       dir_close (dir);
       dir = next_dir;
+      /* Skip the '/'s */
       while (*next_token && *next_token == '/')
         ++next_token;
     }
   /* Cannot open a removed dir */
   if (dir_get_inode (dir)->removed)
     {
+      /* Prevent memory leak */
       dir_close (dir);
       return NULL;
     }
@@ -134,6 +147,7 @@ struct file *
 filesys_open (const char *name)
 {
   const char *file_name = NULL;
+  /* Open the directory that contains the file */
   struct dir *dir = dir_open_with_path (name, &file_name);
   if (!dir)
     return NULL;
@@ -160,6 +174,7 @@ bool
 filesys_remove (const char *name)
 {
   const char *file_name = NULL;
+  /* Open the directory of the file */
   struct dir *dir = dir_open_with_path (name, &file_name);
   bool success = dir != NULL && dir_remove (dir, file_name);
   dir_close (dir);
@@ -171,6 +186,7 @@ bool
 filesys_chdir (const char *name)
 {
   const char *file_name = NULL;
+  /* Open the directory except the last token */
   struct dir *dir = dir_open_with_path (name, &file_name);
   if (!dir)
     return false;
@@ -185,7 +201,9 @@ filesys_chdir (const char *name)
         return false;
     }
   struct thread *cur = thread_current ();
+  /* Close the current working directory */
   dir_close (cur->cwd);
+  /* Record the new current working directory */
   cur->cwd = dir;
   return true;
 }

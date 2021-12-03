@@ -11,8 +11,10 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
+/* Zeros with size of BLOCK_SECTOR_SIZE */
 static char zeros[BLOCK_SECTOR_SIZE];
 
+/* Store indirect blocks */
 struct indirect_inode_disk
 {
   block_sector_t blocks[N_INDIRECT_BLOCKS];
@@ -32,6 +34,7 @@ write_wrapper (block_sector_t sector, const void *buffer)
   block_write (fs_device, sector, buffer);
 }
 
+/* Load a indirect_inode_disk from sector */
 static void
 load_indirect_inode_disk (struct indirect_inode_disk *node,
                           block_sector_t sector)
@@ -39,7 +42,9 @@ load_indirect_inode_disk (struct indirect_inode_disk *node,
   read_wrapper (sector, node);
 }
 
+/* Create inode_disk with `sectors` number of sectors */
 static bool do_inode_create (struct inode_disk *node_disk, size_t sectors);
+/* Close (destroy) inode_disk with `sectors` number of sectors */
 static bool do_inode_close (struct inode_disk *node_disk, size_t sectors);
 
 /* Returns the number of sectors to allocate for an inode SIZE
@@ -50,29 +55,43 @@ bytes_to_sectors (off_t size)
   return DIV_ROUND_UP (size, BLOCK_SECTOR_SIZE);
 }
 
+/* Get the sector num according to a index */
 static block_sector_t
 index_to_sector (const struct inode_disk *node_disk, off_t index)
 {
+  /* Inside the direct blocks */
+  /* Just return the direct block directly */
   if (index < N_LEVEL0)
     return node_disk->direct_blocks[index];
+  /* Inside level 1 */
   if (index < N_LEVEL1)
     {
+      /* First exclude level 0, it has been done previously */
       index -= N_LEVEL0;
       struct indirect_inode_disk level0_nodes;
+      /* Load the indirect block */
       load_indirect_inode_disk (&level0_nodes, node_disk->indirect_block);
+      /* Get the sector in the indirect block */
       return level0_nodes.blocks[index];
     }
+  /* Inside level 2 */
   if (index < N_LEVEL2)
     {
+      /* First exclude level 0 and level 1 */
+      /* They have been done in the previous cases */
       index -= N_LEVEL1;
+      /* Load level 1 nodes (the first indirect level) */
       struct indirect_inode_disk level1_nodes;
       load_indirect_inode_disk (&level1_nodes,
                                 node_disk->doubly_indirect_block);
+      /* Should be located two steps, first (index / N) then -> (index % N) */
       int level1_idx = index / N_INDIRECT_BLOCKS;
       struct indirect_inode_disk level0_nodes;
+      /* Load the second indirect level node */
       load_indirect_inode_disk (&level0_nodes,
                                 level1_nodes.blocks[level1_idx]);
       int level0_idx = index % N_INDIRECT_BLOCKS;
+      /* Get the sector in the second indirect nodes */
       return level0_nodes.blocks[level0_idx];
     }
 
@@ -129,8 +148,10 @@ inode_create (block_sector_t sector, off_t length, bool is_dir)
       disk_inode->length = length;
       disk_inode->magic = INODE_MAGIC;
       disk_inode->is_dir = is_dir;
+      /* Wrap to call inode create */
       if (do_inode_create (disk_inode, sectors))
         {
+          /* Success, then need to write to disk */
           write_wrapper (sector, disk_inode);
           success = true;
         }
@@ -171,6 +192,7 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  /* Change to wrapper because of buffer cache */
   read_wrapper (inode->sector, &inode->data);
   return inode;
 }
@@ -214,6 +236,7 @@ inode_close (struct inode *inode)
           if (inode->data.length >= 0)
             {
               size_t sectors = bytes_to_sectors (inode->data.length);
+              /* Wrapper call to close */
               do_inode_close (&inode->data, sectors);
             }
         }
@@ -272,6 +295,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
               if (bounce == NULL)
                 break;
             }
+          /* Change to wrapper because of buffer cache */
           read_wrapper (sector_idx, bounce);
           memcpy (buffer + bytes_read, bounce + sector_ofs, chunk_size);
         }
@@ -303,12 +327,17 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
     return 0;
 
   /* Write after EOF */
+  /* offset + size - 1 is the end of this write */
   if (byte_to_sector (inode, offset + size - 1) == -1u)
     {
       size_t sectors = bytes_to_sectors (offset + size);
+      /* First need to extend the file */
+      /* Just do inode create */
       if (!do_inode_create (&inode->data, sectors))
         return 0;
+      /* Update the data length */
       inode->data.length = offset + size;
+      /* Use wrapper because of buffer cache */
       write_wrapper (inode->sector, &inode->data);
     }
 
@@ -391,21 +420,27 @@ inode_length (const struct inode *inode)
   return inode->data.length;
 }
 
+/* Create a sector and init with zeros */
 static bool
 do_inode_create_sector (block_sector_t *sector,
                         struct indirect_inode_disk *node)
 {
+  /* Check whether we need to create */
   if (*sector == 0)
     {
+      /* Get a free sector */
       if (!free_map_allocate (1, sector))
         return false;
+      /* Init with zeros */
       write_wrapper (*sector, zeros);
     }
+  /* If used as indirect node, then read the info */
   if (node)
     read_wrapper (*sector, node);
   return true;
 }
 
+/* Create inode_disk with `sectors` number of sectors */
 static bool
 do_inode_create (struct inode_disk *node_disk, size_t sectors)
 {
@@ -442,9 +477,12 @@ do_inode_create (struct inode_disk *node_disk, size_t sectors)
           for (size_t l0_i = 0; l0_i < remain; ++l0_i)
             if (!do_inode_create_sector (&level0_nodes.blocks[l0_i], NULL))
               return false;
+          /* The total remaining sectors */
           sectors -= remain;
+          /* Record the level data */
           write_wrapper (level1_nodes.blocks[l1_i], &level0_nodes);
         }
+      /* Record the doubly indirect block data */
       write_wrapper (node_disk->doubly_indirect_block, &level1_nodes);
     }
   else if (sectors > (size_t)N_LEVEL0)
@@ -461,6 +499,7 @@ do_inode_create (struct inode_disk *node_disk, size_t sectors)
       for (size_t l0_i = 0; l0_i < sectors; ++l0_i)
         if (!do_inode_create_sector (&level0_nodes.blocks[l0_i], NULL))
           return false;
+      /* Record the level data */
       write_wrapper (node_disk->indirect_block, &level0_nodes);
     }
   else
@@ -473,6 +512,7 @@ do_inode_create (struct inode_disk *node_disk, size_t sectors)
   return true;
 }
 
+/* Close inode_disk with `sectors` number of sectors */
 static bool
 do_inode_close (struct inode_disk *node_disk, size_t sectors)
 {
@@ -503,8 +543,10 @@ do_inode_close (struct inode_disk *node_disk, size_t sectors)
           for (size_t l0_i = 0; l0_i < remain; ++l0_i)
             free_map_release (level0_nodes.blocks[l0_i], 1);
           sectors -= remain;
+          /* Free the meta data sector */
           free_map_release (level1_nodes.blocks[l1_i], 1);
         }
+      /* Free the meta data sector */
       free_map_release (node_disk->doubly_indirect_block, 1);
     }
   else if (sectors > (size_t)N_LEVEL0)
@@ -518,6 +560,7 @@ do_inode_close (struct inode_disk *node_disk, size_t sectors)
       load_indirect_inode_disk (&level0_nodes, node_disk->indirect_block);
       for (size_t l0_i = 0; l0_i < sectors; ++l0_i)
         free_map_release (level0_nodes.blocks[l0_i], 1);
+      /* Free the meta data sector */
       free_map_release (node_disk->indirect_block, 1);
     }
   else

@@ -49,6 +49,7 @@ dir_add_father_entry (struct dir *father, struct dir *child)
   /* Ensure "." in child and father */
   if (dir_add_self_entry (child) < 0 || dir_add_self_entry (father) < 0)
     return -1; /* Error */
+  /* ".." is the father */
   return dir_add_entry (child, "..", inode_get_inumber (father->inode));
 }
 /* Check whether dir is empty */
@@ -317,6 +318,7 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
   while (inode_read_at (dir->inode, &e, sizeof e, dir->pos) == sizeof e)
     {
       dir->pos += sizeof e;
+      /* Need to exclude the current and parent directory */
       if (e.in_use && !(!strcmp (e.name, "..") || !strcmp (e.name, ".")))
         {
           strlcpy (name, e.name, NAME_MAX + 1);
