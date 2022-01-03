@@ -68,7 +68,7 @@ timer_calibrate (void)
 
 /* Returns the number of timer ticks since the OS booted. */
 int64_t
-timer_ticks (void)
+timer_ticks (void) 
 {
   enum intr_level old_level = intr_disable ();
   int64_t t = ticks;
@@ -87,23 +87,19 @@ timer_elapsed (int64_t then)
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
-timer_sleep (int64_t ticks)
+timer_sleep (int64_t ticks) 
 {
   /* No need to sleep */
-  if (ticks <= 0)
-    return;
+  if (ticks <= 0) return;
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-
   /* Ensure the process below won't be interrupt */
   enum intr_level old_level = intr_disable ();
-
   /* Record the time to unblock */
   thread_current ()->ticks_to_unblock = start + ticks;
   /* Block the current thread */
   thread_block ();
-  /* Ensure the process above won't be interrupt */
   intr_set_level (old_level);
 }
 
@@ -182,7 +178,7 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  /* Check whether the sleeping thread need to unblock */
+  /* Check whether a thread should wake up, same as proj1 */
   thread_foreach (thread_unblock_check, (void *)&ticks);
   thread_tick ();
 }

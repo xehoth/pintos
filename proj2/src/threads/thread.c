@@ -1,4 +1,9 @@
 #include "threads/thread.h"
+#include <debug.h>
+#include <stddef.h>
+#include <random.h>
+#include <stdio.h>
+#include <string.h>
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -6,11 +11,6 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
-#include <debug.h>
-#include <random.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <string.h>
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -183,16 +183,16 @@ thread_create (const char *name, int priority, thread_func *function,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
-  // !BEGIN MODIFY
-  // prevent main and idle
+  /* >= 3 to prevent main idle thread */
   if (tid >= 3)
     {
       t->process = process_create (t);
+      /* Failed to create process info */
       if (!t->process)
         return TID_ERROR;
+      /* Parent should be the process who create this t process */
       t->parent = thread_current ();
     }
-  // !END MODIFY
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -474,8 +474,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *)t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-  /* Initialize ticks_to_unblock to not unblock */
-  t->ticks_to_unblock = THREAD_TICKS_TO_UNBLOCK_NO_TICKS;
+
+  /* Initialize process infos that are maintained in thread */
   process_thread_init (t);
 
   old_level = intr_disable ();
@@ -597,7 +597,6 @@ allocate_tid (void)
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
-/* Check and unblock the thread whose ticks_to_unblock == ticks */
 void
 thread_unblock_check (struct thread *th, void *ticks)
 {
@@ -610,18 +609,21 @@ thread_unblock_check (struct thread *th, void *ticks)
       thread_unblock (th);
     }
 }
-// !BEGIN MODIFY
+
+/* Get the given tid thread in the all thread list */
 struct thread *
 get_thread (tid_t tid)
 {
   struct list_elem *e;
+  /* Loop through the all thread list */
   for (e = list_begin (&all_list); e != list_end (&all_list);
        e = list_next (e))
     {
       struct thread *t = list_entry (e, struct thread, allelem);
+      /* Check whether the current t's tid == the given tid */
       if (t->tid == tid)
         return t;
     }
+  /* Not found */
   return NULL;
 }
-// !END MODIFY

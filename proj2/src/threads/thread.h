@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "filesys/file.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -24,7 +25,7 @@ typedef int tid_t;
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63     /* Highest priority. */
 
-/* Init value of ticks_to_unblock, shouldn't unblock thread of this value */
+/* Init value of ticks_to_unblock */
 #define THREAD_TICKS_TO_UNBLOCK_NO_TICKS (-1)
 
 /* A kernel thread or user process.
@@ -96,22 +97,21 @@ struct thread
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
 
+  int64_t ticks_to_unblock; /* time tick thread waking up */
+
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
-  uint32_t *pagedir; /* Page directory. */
-
-  struct list child_list;
-  struct thread *parent;
-  struct process *process;
-  struct list open_files;
-  int fd;
-  struct file *self_file; /* File for process self */
+  uint32_t *pagedir;       /* Page directory. */
+  struct list child_list;  /* List to store childs */
+  struct thread *parent;   /* Parent process */
+  struct process *process; /* Process info */
+  struct file *self_file;  /* File for process self */
+  struct list open_files;  /* List of opened files under current thread */
+  int fd;                  /* Counter to set correct file descriptor */
 #endif
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
-
-  int64_t ticks_to_unblock; /* The time to unblock the sleeping thread */
 };
 
 /* If false (default), use round-robin scheduler.
@@ -149,11 +149,9 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-
-/* Check and unblock the thread whose ticks_to_unblock == ticks */
+/* Check and unblock the thread if ticks_to_unblock == ticks */
 void thread_unblock_check (struct thread *th, void *ticks);
-
-// !BEGIN MODIFY
+/* Get the given tid thread in the all thread list */
 struct thread *get_thread (tid_t tid);
-// !END MODIFY
+
 #endif /* threads/thread.h */

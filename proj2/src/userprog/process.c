@@ -1,43 +1,45 @@
 #include "userprog/process.h"
-#include "filesys/directory.h"
-#include "filesys/file.h"
-#include "filesys/filesys.h"
-#include "threads/flags.h"
-#include "threads/init.h"
-#include "threads/interrupt.h"
-#include "threads/malloc.h"
-#include "threads/palloc.h"
-#include "threads/synch.h"
-#include "threads/thread.h"
-#include "threads/vaddr.h"
-#include "userprog/gdt.h"
-#include "userprog/pagedir.h"
-#include "userprog/tss.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "userprog/gdt.h"
+#include "userprog/pagedir.h"
+#include "userprog/tss.h"
+#include "filesys/directory.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
+#include "threads/flags.h"
+#include "threads/init.h"
+#include "threads/interrupt.h"
+#include "threads/palloc.h"
+#include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "threads/malloc.h"
 
-// !!!BEGIN MODIFY
+/* Return address type */
 typedef void (*ret_addr_t) (void);
 
+/* The stack types: union is more elegant */
 typedef union
 {
-  char *p_char;
-  char **p_pchar;
-  char ***p_ppchar;
-  uint8_t *p_u8;
-  unsigned u32;
-  int *p_int;
-  ret_addr_t *p_ra;
+  char *p_char;     /* Use to modify char type */
+  char **p_pchar;   /* Use to modify char[]/char* type */
+  char ***p_ppchar; /* Use to modify char** type */
+  uint8_t *p_u8;    /* Use to modify uint8_t type */
+  unsigned u32;     /* Use to get the address value */
+  int *p_int;       /* Use to modify int type */
+  ret_addr_t *p_ra; /* Use to modify return address */
 } esp_t;
 
+/* Parse arguments for the stack */
 static void parse_args (esp_t *esp, char *args_str, char *save_ptr);
+/* Deny write to self file */
 static bool deny_write_to_self (struct thread *cur, const char *name);
+/* Recover the deny for writing to self */
 static void recover_write_to_self (struct thread *cur);
-// !!!END MODIFY
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -57,36 +59,42 @@ process_execute (const char *file_name)
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
-
-  // !BEGIN MODIFY
+  /* Another copy of FILE_NAME, but only the first token (only file name) */
   char *exact_file_name = palloc_get_page (0);
+  /* Failed to get a page */
   if (!exact_file_name)
     {
+      /* Prevent memory leak */
       palloc_free_page (fn_copy);
       return TID_ERROR;
     }
+  /* Make copy of file_name */
   strlcpy (exact_file_name, file_name, PGSIZE);
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  // split with " "
+  /* split with " " */
   char *save_ptr;
   char *token = strtok_r (exact_file_name, " ", &save_ptr);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (token, PRI_DEFAULT, start_process, fn_copy);
+  /* Prevent memory leak */
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
+
+  /* Free the allocated page */
   palloc_free_page (exact_file_name);
 
+  /* Thread create success */
   if (tid != TID_ERROR)
     {
-
+      /* Get the child process */
       struct thread *child = get_thread (tid);
       ASSERT (child);
       ASSERT (child->parent);
+      /* Insert child into parent's list */
       list_push_back (&child->parent->child_list, &child->process->elem);
     }
-  // !END MODIFY
   return tid;
 }
 
@@ -105,39 +113,51 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
 
-  // !BEGIN MODIFY
+  /* Split with " ", get the file name */
   char *save_ptr;
   char *token = strtok_r (file_name, " ", &save_ptr);
+
   success = load (file_name, &if_.eip, &if_.esp);
 
   struct thread *cur = thread_current ();
   /* If load failed, quit. */
   if (!success)
     {
+      /* Prevent memory leak */
       palloc_free_page (file_name);
+      /* Set the runnin status to error because of loading failed */
       cur->process->status = PROCESS_ERROR;
+      /* Load has been finished, sema up the load sema */
       sema_up (&cur->process->load_sema);
+      /* Quit */
       thread_exit ();
     }
   else
     {
+      /* Load success, then parse arguments to stack */
       parse_args ((esp_t *)&if_.esp, token, save_ptr);
+      /* Deny writing to self */
       bool deny_success = deny_write_to_self (cur, token);
+      /* Remember to free the allocated page, prevent memory leak */
       palloc_free_page (file_name);
       if (deny_success)
         {
+          /* Set status to running normally */
           cur->process->status = PROCESS_RUNNING;
+          /* Load has been finished, sema up the load sema */
           sema_up (&cur->process->load_sema);
         }
       else
         {
-          // failed
+          /* Failed to deny writing to self */
+          /* Set the running status to error */
           cur->process->status = PROCESS_ERROR;
+          /* Load has been finished, sema up the load sema */
           sema_up (&cur->process->load_sema);
+          /* Quit */
           thread_exit ();
         }
     }
-  // !END MODIFY
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -161,19 +181,25 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid)
 {
-  // !BEGIN MODIFY
   struct thread *cur = thread_current ();
+  /* Get the child according to the pid */
   struct process *child = get_child_process (&cur->child_list, child_tid);
+  /* Not found, then error */
   if (!child)
     return -1;
-  // wait for child running
+  /* Wait for child running */
   sema_down (&child->wait_sema);
-  // child run finish
+  /* Child run finish */
+  /* Then remove from child list */
   list_remove (&child->elem);
+  /* The process struct is allocated by malloc */
+  /* So, even if child thread has been destroyed */
+  /* We can still get the information in the child struct */
+  /* Get the child process's exit code */
   int exit_code = child->exit_code;
+  /* Need to free to prevent memory leak */
   free (child);
   return exit_code;
-  // !END MODIFY
 }
 
 /* Free the current process's resources. */
@@ -188,9 +214,8 @@ process_exit (void)
   pd = cur->pagedir;
   if (pd != NULL)
     {
-      // !BEGIN MODIFY
+      /* Print the exit code */
       printf ("%s: exit(%d)\n", cur->name, cur->process->exit_code);
-      // !END MODIFY
       /* Correct ordering here is crucial.  We must set
          cur->pagedir to NULL before switching page directories,
          so that a timer interrupt can't switch back to the
@@ -202,12 +227,14 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  // !BEGIN MODIFY
+
+  /* Change the a normally running process's status to exited  */
   if (cur->process->status != PROCESS_ERROR)
     cur->process->status = PROCESS_EXITED;
+  /* Recover write */
   recover_write_to_self (cur);
+  /* Process exit, then sema up the wait sema */
   sema_up (&cur->process->wait_sema);
-  // !END MODIFY
 }
 
 /* Sets up the CPU for running user code in the current
@@ -554,67 +581,120 @@ install_page (void *upage, void *kpage, bool writable)
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
-// !BEGIN MODIFY
+
+/* Parse arguments for the stack */
 static void
 parse_args (esp_t *esp, char *args_str, char *save_ptr)
 {
-  // start from save_ptr, the first token is process it self
+  /* Start from save_ptr, the first token is process it self */
   int argc = 1;
+  /* First get the argument num */
   for (char *c = save_ptr;;)
     {
+      /* Skip the space before an argument */
       while (c && *c && *c == ' ')
         ++c;
       if (!c || !*c)
         break;
+      /* One valid argument */
       ++argc;
+      /* Move to next token */
       while (c && *c && *c != ' ')
         ++c;
     }
+  /* We can use this dynamic array because we are using C */
+  /* This is currently supported in C standard but not in C++ */
   char *argv[argc];
   int argv_len = 0;
-  // push args
+  /* Push args */
   for (char *arg = args_str; arg; arg = strtok_r (NULL, " ", &save_ptr))
     {
       argv[argv_len++] = arg;
     }
   ASSERT (argv_len == argc);
 
+  /* Store the arg adress according to the table in Stanford web page */
   char *args_addr[argc];
-
+  /* Arguments need to be pushed reversely, since stack grow downward */
   for (int i = argc - 1; i >= 0; --i)
     {
       const int arg_len = strlen (argv[i]);
-      // add 1 for '\0'
+      /* Add 1 for '\0' */
       esp->p_char -= arg_len + 1;
+      /* Copy arguments to the stack */
       strlcpy (esp->p_char, argv[i], arg_len + 1);
+      /* Store the address for argv[i] in the stack */
       args_addr[i] = esp->p_char;
     }
 
-  // word align
+  /* Word align */
   while (esp->u32 % 4 != 0)
     *--esp->p_u8 = 0;
 
-  // push args addr
-  // last empty addr
+  /* Push args addr */
+  /* Last empty addr */
   *--esp->p_pchar = NULL;
 
-  // push args addr
+  /* Push args addr */
   for (int i = argc - 1; i >= 0; --i)
     {
       *--esp->p_pchar = args_addr[i];
     }
 
-  // push argv
+  /* Push argv */
   char **argv_start = esp->p_pchar;
   *--esp->p_ppchar = argv_start;
 
-  // push argc
+  /* Push argc */
   *--esp->p_int = argc;
 
-  // push return address
+  /* Push return address */
   *--esp->p_ra = NULL;
 }
 
+/* Deny write to self file */
+static bool
+deny_write_to_self (struct thread *cur, const char *name)
+{
+  /* Open self file */
+  cur->self_file = filesys_open (name);
+  /* Open failed */
+  if (!cur->self_file)
+    return false;
+  /* Deny write */
+  file_deny_write (cur->self_file);
+  return true;
+}
+
+/* Recover the deny for writing to self */
+static void
+recover_write_to_self (struct thread *cur)
+{
+  /* First ensure the self file exists */
+  if (cur->self_file)
+    {
+      /* Recover: allow write */
+      file_allow_write (cur->self_file);
+      /* Close the file */
+      file_close (cur->self_file);
+      cur->self_file = NULL;
+    }
+}
+
+/* Init process infos that are maintained in thread */
+void
+process_thread_init (struct thread *th)
+{
+  th->parent = NULL;
+  th->process = NULL;
+  list_init (&th->child_list);
+  list_init (&th->open_files);
+  th->fd = 2; /* Reserved for stdin and stdout */
+  th->self_file = NULL;
+}
+
+/* Create a process, here this create just create the process struct */
+/* Not the general meaning of process */
 struct process *
 process_create (struct thread *th)
 {
@@ -631,48 +711,19 @@ process_create (struct thread *th)
   return proc;
 }
 
-void
-process_thread_init (struct thread *th)
-{
-  th->parent = NULL;
-  th->process = NULL;
-  list_init (&th->child_list);
-  list_init (&th->open_files);
-  th->fd = 2;
-  th->self_file = NULL;
-}
-
+/* Get the child process with given pid in the list l */
 struct process *
 get_child_process (struct list *l, pid_t pid)
 {
   struct list_elem *e;
+  /* Loop through list l */
   for (e = list_begin (l); e != list_end (l); e = list_next (e))
     {
       struct process *proc = list_entry (e, struct process, elem);
+      /* Check whether the current proc's pid == the given pid */
       if (proc->pid == pid)
         return proc;
     }
+  /* Not found */
   return NULL;
 }
-
-static bool
-deny_write_to_self (struct thread *cur, const char *name)
-{
-  cur->self_file = filesys_open (name);
-  if (!cur->self_file)
-    return false;
-  file_deny_write (cur->self_file);
-  return true;
-}
-
-static void
-recover_write_to_self (struct thread *cur)
-{
-  if (cur->self_file)
-    {
-      file_allow_write (cur->self_file);
-      file_close (cur->self_file);
-      cur->self_file = NULL;
-    }
-}
-// !END MODIFY
