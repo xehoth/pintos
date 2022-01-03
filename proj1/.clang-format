@@ -1,0 +1,5 @@
+BasedOnStyle: GNU
+SortIncludes: false
+UseCRLF: false
+DeriveLineEnding: false
+ColumnLimit: 79
